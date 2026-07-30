@@ -13,19 +13,16 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middlewares globales
 app.use(cors({
-  origin: process.env.FRONTEND_URL || '*', // luego lo restringimos al dominio real
+  origin: process.env.FRONTEND_URL || '*',
   credentials: true
 }));
-app.use(express.json()); // permite leer JSON en req.body
+app.use(express.json());
 
-// Health check (Render lo usa para saber si el server está vivo)
 app.get('/health', (req, res) => {
   res.json({ status: 'OK' });
 });
 
-// Rutas
 app.use('/auth', authRoutes);
 app.use('/marcas', marcasRoutes);
 app.use('/products', productosRoutes);
