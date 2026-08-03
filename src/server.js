@@ -36,9 +36,10 @@ app.use('/orders', ordenesRoutes);
 app.use('/users', usersRoutes);
 app.use('/facturas', facturasRoutes);
 app.use('/pagos', pagosRoutes);
-app.use('/clientes/estado-cuenta', estadocuentaRoutes);
+app.use('/clientes', estadocuentaRoutes);
 app.use('/notifications', notificacionesRoutes);
 app.use('/lists', listasRoutes)
+
 
 app.listen(PORT, () => {
   console.log(`🚀 Servidor corriendo en puerto ${PORT}`);

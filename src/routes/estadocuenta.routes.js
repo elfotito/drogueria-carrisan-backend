@@ -4,9 +4,10 @@ import { verifyJWT, verifyAdmin } from '../middleware/auth.js';
 
 const router = Router();
 
-router.use(verifyJWT, verifyAdmin);
+// Solo admin ve el resumen de todos los clientes
+router.get('/estado-cuenta', verifyJWT, verifyAdmin, getResumenClientes);
 
-router.get('/', getResumenClientes);
-router.get('/:id', getEstadoCuenta);
+// Admin ve cualquier cliente, usuario normal solo se ve a sí mismo
+router.get('/:id/estado-cuenta', verifyJWT, getEstadoCuenta);
 
 export default router;

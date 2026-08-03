@@ -4,6 +4,11 @@ import { supabase } from '../config/supabase.js';
 export async function getEstadoCuenta(req, res) {
   const { id } = req.params;
 
+  // Si no es admin, solo puede ver su propio estado de cuenta
+  if (!req.user.es_admin && req.user.id !== Number(id)) {
+    return res.status(403).json({ error: 'No autorizado' });
+  }
+
   try {
     // 1. Datos del cliente (incluye su línea de crédito)
     const { data: cliente, error: errorCliente } = await supabase
