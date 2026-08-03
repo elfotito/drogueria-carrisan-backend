@@ -26,6 +26,75 @@ export async function getPagos(req, res) {
 }
 
 // POST /pagos (admin) - registrar un abono, opcionalmente saldando facturas
+export async function createPago(req, res) {
+  const { usuario_id, monto, tipo, detalle, factura_ids } = req.body;
+
+  if (!usuario_id || !monto) {
+    return res.status(400).json({ error: 'usuario_id y monto son requeridos' });
+  }
+
+  try {
+    // 1. Crear el pago
+    const { data: pago, error: errorPago } = await supabase
+      .from('pagos')
+      .insert({
+        usuario_id,
+        monto,
+        tipo: tipo || 'abono',
+        detalle,
+        created_by: req.user.id
+      })
+      .select()
+      .single();
+
+    if (errorPago) throw errorPago;
+
+    // 2. Si el admin marcó facturas específicas como saldadas con este pago
+    if (factura_ids && factura_ids.length > 0) {
+      const registros = factura_ids.map(factura_id => ({
+        pago_id: pago.id,
+        factura_id
+      }));
+
+      const { error: errorVinculo } = await supabase
+        .from('pago_facturas')
+        .insert(registros);
+
+      if (errorVinculo) {
+        await supabase.from('pagos').delete().eq('id', pago.id);
+        throw errorVinculo;
+      }
+
+      // 3. Marcar esas facturas como 'pagada'
+      const { error: errorEstado } = await supabase
+        .from('facturas')
+        .update({ estado: 'pagada' })
+        .in('id', factura_ids);
+
+      if (errorEstado) throw errorEstado;
+    }
+
+    // 4. Notificar al cliente
+    const facturasTexto = factura_ids && factura_ids.length > 0
+      ? ` (Facturas: ${factura_ids.join(', ')})`
+      : '';
+
+    await crearNotificacion(
+      usuario_id,
+      'pago_registrado',
+      'Pago registrado',
+      `Se registró un abono por $${monto}${facturasTexto}`,
+      null
+    );
+
+    res.status(201).json(pago);
+  } catch (err) {
+    console.error('Error al crear pago:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
+// DELETE /pagos/:id (admin) - por si se registra mal un abono
 export async function deletePago(req, res) {
   const { id } = req.params;
 
