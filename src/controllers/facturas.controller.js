@@ -1,4 +1,4 @@
-import { supabase } from '../config/supabase.js';
+import { crearNotificacion } from './notificaciones.controller.js';
 
 // GET /facturas?usuario_id= (admin)
 export async function getFacturas(req, res) {
@@ -70,6 +70,14 @@ export async function createFactura(req, res) {
         throw errorVinculo;
       }
     }
+
+    await crearNotificacion(
+      usuario_id,
+      'factura_emitida',
+      'Factura emitida',
+      `Se emitió la factura #${numero_factura} por $${monto_facturado}`,
+      null
+    );
 
     res.status(201).json(factura);
   } catch (err) {

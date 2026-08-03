@@ -1,4 +1,5 @@
 import { supabase } from '../config/supabase.js';
+import { crearNotificacion } from './notificaciones.controller.js';
 
 // POST /orders
 export async function createOrden(req, res) {
@@ -59,6 +60,14 @@ export async function createOrden(req, res) {
       await supabase.from('ordenes').delete().eq('id', orden.id);
       throw errorItems;
     }
+
+    await crearNotificacion(
+      usuario_id,
+      'orden_creada',
+      'Orden creada',
+      `Tu orden #${orden.id} por $${total_usd} fue recibida`,
+      orden.id
+    );
 
     res.status(201).json({ ...orden, items: itemsConPrecio });
   } catch (err) {
@@ -139,5 +148,14 @@ export async function updateEstadoOrden(req, res) {
   } catch (err) {
     console.error('Error al actualizar estado:', err);
     res.status(500).json({ error: 'Error del servidor' });
+  }
+    if (data) {
+    await crearNotificacion(
+      data.usuario_id,
+      'estado_cambiado',
+      'Estado actualizado',
+      `Tu orden #${data.id} cambió a: ${estado}`,
+      data.id
+    );
   }
 }

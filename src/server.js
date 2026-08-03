@@ -10,6 +10,8 @@ import usersRoutes from './routes/users.routes.js';
 import facturasRoutes from './routes/facturas.routes.js';
 import pagosRoutes from './routes/pagos.routes.js';
 import estadocuentaRoutes from './routes/estadocuenta.routes.js';
+import notificacionesRoutes from './routes/notificaciones.routes.js';
+import listasRoutes from './routes/listas.routes.js';
 
 dotenv.config();
 
@@ -35,6 +37,8 @@ app.use('/users', usersRoutes);
 app.use('/facturas', facturasRoutes);
 app.use('/pagos', pagosRoutes);
 app.use('/clientes/estado-cuenta', estadocuentaRoutes);
+app.use('/notifications', notificacionesRoutes);
+app.use('/lists', listasRoutes)
 
 app.listen(PORT, () => {
   console.log(`🚀 Servidor corriendo en puerto ${PORT}`);

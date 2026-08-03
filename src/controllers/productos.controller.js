@@ -1,8 +1,19 @@
 import { supabase } from '../config/supabase.js';
 
-// GET /products?search=&marca_id=&linea=&forma=&pais_origen=
+// GET /products?search=&marca_id=&sort=
 export async function getProductos(req, res) {
-  const { search, marca_id, linea, forma, pais_origen } = req.query;
+  const { search, marca_id, sort } = req.query;
+
+  // Mapa de valores permitidos de "sort" -> columna real + dirección
+  // (whitelist explícita para no pasar strings arbitrarios directo a Supabase)
+  const opcionesOrden = {
+    nombre_asc: { column: 'nombre_comercial', ascending: true },
+    nombre_desc: { column: 'nombre_comercial', ascending: false },
+    precio_asc: { column: 'precio_usd', ascending: true },
+    precio_desc: { column: 'precio_usd', ascending: false },
+  };
+
+  const orden = opcionesOrden[sort] || opcionesOrden.nombre_asc;
 
   try {
     let query = supabase
@@ -10,19 +21,17 @@ export async function getProductos(req, res) {
       .select('*, marcas(id, nombre)')
       .eq('activo', true);
 
-    // Búsqueda amplia: nombre comercial, laboratorio o molécula
     if (search) {
-      query = query.or(
-        `nombre_comercial.ilike.%${search}%,laboratorio.ilike.%${search}%,molecula.ilike.%${search}%`
-      );
+      query = query.ilike('nombre_comercial', `%${search}%`);
     }
 
-    if (marca_id) query = query.eq('marca_id', marca_id);
-    if (linea) query = query.eq('linea', linea);
-    if (forma) query = query.eq('forma', forma);
-    if (pais_origen) query = query.eq('pais_origen', pais_origen);
+    if (marca_id) {
+      query = query.eq('marca_id', marca_id);
+    }
 
-    const { data, error } = await query.order('nombre_comercial', { ascending: true });
+    const { data, error } = await query.order(orden.column, {
+      ascending: orden.ascending,
+    });
 
     if (error) throw error;
 
