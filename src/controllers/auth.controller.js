@@ -101,3 +101,74 @@ export async function verify(req, res) {
   // Si llegó hasta acá, el middleware verifyJWT ya validó el token
   res.json({ valid: true, user: req.user });
 }
+
+// POST /auth/check-email
+// Paso 1 del login por pasos: solo confirma si el correo existe, sin dar
+// pistas de más (no decimos si está activo o no acá, eso lo maneja login()
+// normalmente en el paso 2).
+export async function checkEmail(req, res) {
+  const { email } = req.body;
+
+  if (!email) {
+    return res.status(400).json({ error: 'Email es requerido' });
+  }
+
+  try {
+    const { data } = await supabase
+      .from('users')
+      .select('id')
+      .eq('email', email)
+      .single();
+
+    res.json({ existe: !!data });
+  } catch (err) {
+    console.error('Error en checkEmail:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
+// POST /auth/reset-password
+// Reseteo simple sin email: en vez de un link temporal, usamos rif_cedula
+// como una segunda prueba de identidad que solo el dueño de la cuenta conoce.
+// Importante: el mensaje de error es genérico a propósito, para no revelar
+// si el email existe o si fue el rif_cedula el que no coincidió.
+export async function resetPassword(req, res) {
+  const { email, rif_cedula, password } = req.body;
+
+  if (!email || !rif_cedula || !password) {
+    return res.status(400).json({ error: 'Todos los campos son requeridos' });
+  }
+
+  try {
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('id, rif_cedula')
+      .eq('email', email)
+      .single();
+
+    // Comparación case-insensitive y sin espacios de más, por si el usuario
+    // tipeó el RIF con formato distinto (ej. mayúsculas/minúsculas, espacios)
+    const coincide =
+      user &&
+      user.rif_cedula &&
+      user.rif_cedula.trim().toLowerCase() === rif_cedula.trim().toLowerCase();
+
+    if (error || !user || !coincide) {
+      return res.status(401).json({ error: 'Los datos no coinciden' });
+    }
+
+    const password_hash = await bcrypt.hash(password, 10);
+
+    const { error: errorUpdate } = await supabase
+      .from('users')
+      .update({ password_hash })
+      .eq('id', user.id);
+
+    if (errorUpdate) throw errorUpdate;
+
+    res.json({ message: 'Contraseña actualizada correctamente' });
+  } catch (err) {
+    console.error('Error en resetPassword:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
