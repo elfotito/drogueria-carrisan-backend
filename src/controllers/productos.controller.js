@@ -105,3 +105,4 @@ export async function updateProducto(req, res) {
     res.status(500).json({ error: 'Error del servidor' });
   }
 }
+
