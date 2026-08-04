@@ -1,4 +1,5 @@
 import { supabase } from '../config/supabase.js';
+import { aplicarDescuentosAProductos, aplicarDescuentoAProducto } from './descuentos.controller.js';
 
 // GET /products?search=&marca_id=
 export async function getProductos(req, res) {
@@ -11,7 +12,7 @@ export async function getProductos(req, res) {
       .eq('activo', true);
 
     if (search) {
-      query = query.ilike('nombre', `%${search}%`);
+      query = query.ilike('nombre_comercial', `%${search}%`);
     }
 
     if (marca_id) {
@@ -22,7 +23,10 @@ export async function getProductos(req, res) {
 
     if (error) throw error;
 
-    res.json(data);
+    // 👇 único agregado: enriquece cada producto con precio_usd final (si tiene descuento vigente)
+    const productosConDescuento = await aplicarDescuentosAProductos(data);
+
+    res.json(productosConDescuento);
   } catch (err) {
     console.error('Error al obtener productos:', err);
     res.status(500).json({ error: 'Error del servidor' });
@@ -44,7 +48,10 @@ export async function getProductoById(req, res) {
       return res.status(404).json({ error: 'Producto no encontrado' });
     }
 
-    res.json(data);
+    // 👇 único agregado
+    const productoConDescuento = await aplicarDescuentoAProducto(data);
+
+    res.json(productoConDescuento);
   } catch (err) {
     console.error('Error al obtener producto:', err);
     res.status(500).json({ error: 'Error del servidor' });
@@ -53,16 +60,16 @@ export async function getProductoById(req, res) {
 
 // POST /products (admin)
 export async function createProducto(req, res) {
-  const { nombre, descripcion, marca_id, precio_usd, foto_url } = req.body;
+  const { nombre_comercial, descripcion, marca_id, precio_usd, foto_url } = req.body;
 
-  if (!nombre || !precio_usd) {
-    return res.status(400).json({ error: 'Nombre y precio_usd son requeridos' });
+  if (!nombre_comercial || !precio_usd) {
+    return res.status(400).json({ error: 'nombre_comercial y precio_usd son requeridos' });
   }
 
   try {
     const { data, error } = await supabase
       .from('productos')
-      .insert({ nombre, descripcion, marca_id, precio_usd, foto_url })
+      .insert({ nombre_comercial, descripcion, marca_id, precio_usd, foto_url })
       .select()
       .single();
 
