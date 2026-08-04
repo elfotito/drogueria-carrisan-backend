@@ -1,20 +1,20 @@
-const express = require('express')
-const router = express.Router()
-const {
+import express from 'express';
+import {
   listarDescuentos,
   historialPorProducto,
   crearDescuento,
   editarDescuento,
   eliminarDescuento,
-} = require('../controllers/descuentos.controller')
-const verifyJWT = require('../middleware/verifyJWT') // ajusta el nombre/ruta real
-const soloAdmin = require('../middleware/soloAdmin')  // si ya tienes un middleware de rol admin
+} from '../controllers/descuentos.controller.js';
+import verifyJWT from '../middleware/verifyJWT.js'; // ajusta el nombre real si difiere
+import soloAdmin from '../middleware/soloAdmin.middleware.js';
 
-// Todas protegidas: solo admin gestiona descuentos
-router.get('/', verifyJWT, soloAdmin, listarDescuentos)
-router.get('/producto/:id', verifyJWT, soloAdmin, historialPorProducto)
-router.post('/', verifyJWT, soloAdmin, crearDescuento)
-router.put('/:id', verifyJWT, soloAdmin, editarDescuento)
-router.delete('/:id', verifyJWT, soloAdmin, eliminarDescuento)
+const router = express.Router();
 
-module.exports = router
+router.get('/', verifyJWT, soloAdmin, listarDescuentos);
+router.get('/producto/:id', verifyJWT, soloAdmin, historialPorProducto);
+router.post('/', verifyJWT, soloAdmin, crearDescuento);
+router.put('/:id', verifyJWT, soloAdmin, editarDescuento);
+router.delete('/:id', verifyJWT, soloAdmin, eliminarDescuento);
+
+export default router;
