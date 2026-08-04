@@ -1,4 +1,4 @@
-const supabase = require('../config/supabase') // ajusta la ruta a tu cliente de Supabase
+import { supabase } from '../config/supabase.js'
 
 // ===================================================================
 // Helpers de negocio (exportados para usarlos en productosController)
@@ -8,7 +8,7 @@ const supabase = require('../config/supabase') // ajusta la ruta a tu cliente de
  * Trae todos los descuentos actualmente vigentes:
  * activo = true, fecha_inicio <= now, fecha_fin >= now o NULL
  */
-async function getDescuentosVigentes() {
+export async function getDescuentosVigentes() {
   const ahora = new Date().toISOString()
 
   const { data, error } = await supabase
@@ -61,7 +61,7 @@ function calcularDescuentoUSD(descuento, precioBase) {
  *
  * Regla: si varios descuentos aplican, gana el que dé MAYOR ahorro en USD.
  */
-function resolverPrecioProducto(producto, descuentosVigentes) {
+export function resolverPrecioProducto(producto, descuentosVigentes) {
   if (producto.precio_usd == null) {
     return { ...producto, precio_original_usd: null, descuento_activo: null }
   }
@@ -99,7 +99,7 @@ function resolverPrecioProducto(producto, descuentosVigentes) {
  * Aplica descuentos a un array de productos en un solo paso.
  * Úsalo en getProductos (listado).
  */
-async function aplicarDescuentosAProductos(productos) {
+export async function aplicarDescuentosAProductos(productos) {
   const vigentes = await getDescuentosVigentes()
   return productos.map(p => resolverPrecioProducto(p, vigentes))
 }
@@ -108,7 +108,7 @@ async function aplicarDescuentosAProductos(productos) {
  * Aplica descuentos a un solo producto.
  * Úsalo en getProductoById (detalle).
  */
-async function aplicarDescuentoAProducto(producto) {
+export async function aplicarDescuentoAProducto(producto) {
   const vigentes = await getDescuentosVigentes()
   return resolverPrecioProducto(producto, vigentes)
 }
@@ -118,7 +118,7 @@ async function aplicarDescuentoAProducto(producto) {
 // ===================================================================
 
 // GET /descuentos  — listado completo para el panel admin, con datos del producto/marca si aplica
-async function listarDescuentos(req, res) {
+export async function listarDescuentos(req, res) {
   try {
     const { data, error } = await supabase
       .from('descuentos')
@@ -145,9 +145,9 @@ async function listarDescuentos(req, res) {
 }
 
 // GET /descuentos/producto/:id — historial de descuentos de un producto puntual
-// (solo alcance='producto'; si quieres incluir los de marca/laboratorio que también
-// le apliquen, dímelo y lo extendemos)
-async function historialPorProducto(req, res) {
+// (solo alcance='producto'; los de marca/laboratorio/etc que también le apliquen
+// no salen aquí porque no están ligados a producto_id — es solo su historial directo)
+export async function historialPorProducto(req, res) {
   try {
     const { id } = req.params
     const { data, error } = await supabase
@@ -165,7 +165,7 @@ async function historialPorProducto(req, res) {
 }
 
 // POST /descuentos — crear
-async function crearDescuento(req, res) {
+export async function crearDescuento(req, res) {
   try {
     const {
       alcance,
@@ -213,7 +213,7 @@ async function crearDescuento(req, res) {
 }
 
 // PUT /descuentos/:id — editar
-async function editarDescuento(req, res) {
+export async function editarDescuento(req, res) {
   try {
     const { id } = req.params
     const {
@@ -264,7 +264,7 @@ async function editarDescuento(req, res) {
 }
 
 // DELETE /descuentos/:id
-async function eliminarDescuento(req, res) {
+export async function eliminarDescuento(req, res) {
   try {
     const { id } = req.params
     const { error } = await supabase.from('descuentos').delete().eq('id', id)
@@ -323,18 +323,4 @@ function calcularEstadoDescuento(descuento, ahora) {
   if (inicio > ahora) return 'programado'
   if (fin && fin < ahora) return 'expirado'
   return 'vigente'
-}
-
-module.exports = {
-  // endpoints
-  listarDescuentos,
-  historialPorProducto,
-  crearDescuento,
-  editarDescuento,
-  eliminarDescuento,
-  // helpers para usar en productosController
-  getDescuentosVigentes,
-  aplicarDescuentosAProductos,
-  aplicarDescuentoAProducto,
-  resolverPrecioProducto,
 }
