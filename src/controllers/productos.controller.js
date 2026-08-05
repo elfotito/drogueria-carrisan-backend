@@ -1,9 +1,20 @@
 import { supabase } from '../config/supabase.js';
 import { aplicarDescuentosAProductos, aplicarDescuentoAProducto } from './descuentos.controller.js';
 
-// GET /products?search=&marca_id=
+// GET /products?search=&marca_id=&sort=
 export async function getProductos(req, res) {
-  const { search, marca_id } = req.query;
+  const { search, marca_id, sort } = req.query;
+
+  // Mapa de valores permitidos de "sort" -> columna real + dirección
+  // (whitelist explícita para no pasar strings arbitrarios directo a Supabase)
+  const opcionesOrden = {
+    nombre_asc: { column: 'nombre_comercial', ascending: true },
+    nombre_desc: { column: 'nombre_comercial', ascending: false },
+    precio_asc: { column: 'precio_usd', ascending: true },
+    precio_desc: { column: 'precio_usd', ascending: false },
+  };
+
+  const orden = opcionesOrden[sort] || opcionesOrden.nombre_asc;
 
   try {
     let query = supabase
@@ -19,7 +30,9 @@ export async function getProductos(req, res) {
       query = query.eq('marca_id', marca_id);
     }
 
-    const { data, error } = await query.order('nombre_comercial', { ascending: true });
+    const { data, error } = await query.order(orden.column, {
+      ascending: orden.ascending,
+    });
 
     if (error) throw error;
 
@@ -60,7 +73,10 @@ export async function getProductoById(req, res) {
 
 // POST /products (admin)
 export async function createProducto(req, res) {
-  const { nombre_comercial, descripcion, marca_id, precio_usd, foto_url } = req.body;
+  const {
+    nombre_comercial, descripcion, marca_id, precio_usd, foto_url,
+    laboratorio, pais_origen, molecula, linea, forma, disponible
+  } = req.body;
 
   if (!nombre_comercial || !precio_usd) {
     return res.status(400).json({ error: 'nombre_comercial y precio_usd son requeridos' });
@@ -69,7 +85,19 @@ export async function createProducto(req, res) {
   try {
     const { data, error } = await supabase
       .from('productos')
-      .insert({ nombre_comercial, descripcion, marca_id, precio_usd, foto_url })
+      .insert({
+        nombre_comercial,
+        descripcion,
+        marca_id,
+        precio_usd,
+        foto_url,
+        laboratorio,
+        pais_origen,
+        molecula,
+        linea,
+        forma,
+        disponible: disponible !== undefined ? disponible : true
+      })
       .select()
       .single();
 
@@ -82,10 +110,10 @@ export async function createProducto(req, res) {
   }
 }
 
-// PATCH /products/:id (admin)
+// PATCH /products/:id (admin) — ya era genérico, sigue funcionando igual con los campos nuevos
 export async function updateProducto(req, res) {
   const { id } = req.params;
-  const cambios = req.body; // ej: { precio_usd: 15.50 } o { activo: false }
+  const cambios = req.body;
 
   try {
     const { data, error } = await supabase
