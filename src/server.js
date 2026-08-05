@@ -7,6 +7,7 @@ import productosRoutes from './routes/productos.routes.js';
 import preciosRoutes from './routes/precios.routes.js';
 import ordenesRoutes from './routes/ordenes.routes.js';
 import usersRoutes from './routes/users.routes.js';
+import descuentosRoutes from './routes/descuentos.routes.js';
 
 dotenv.config();
 
@@ -29,6 +30,7 @@ app.use('/products', productosRoutes);
 app.use('/prices', preciosRoutes);
 app.use('/orders', ordenesRoutes);
 app.use('/users', usersRoutes);
+app.use('/descuentos', descuentosRoutes); // 👈 NUEVO
 
 app.listen(PORT, () => {
   console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
