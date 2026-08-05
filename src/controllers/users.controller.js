@@ -6,12 +6,14 @@ export async function getUsers(req, res) {
   try {
     const { data, error } = await supabase
       .from('users')
-      .select('id, email, nombre, etiqueta, es_admin, activo, created_at')
+      .select('*') // Cambiado de lista específica a * para obtener todos los campos
       .order('created_at', { ascending: false });
 
     if (error) throw error;
 
-    res.json(data);
+    // Por seguridad, no enviar el password_hash
+    const usuariosSinPassword = data.map(({ password_hash, ...usuario }) => usuario);
+    res.json(usuariosSinPassword);
   } catch (err) {
     console.error('Error al obtener usuarios:', err);
     res.status(500).json({ error: 'Error del servidor' });
@@ -19,9 +21,19 @@ export async function getUsers(req, res) {
 }
 
 // POST /users (admin) - crear usuario
-// (Esto es básicamente lo mismo que /auth/register, pero bajo /users para organizarlo mejor)
 export async function createUser(req, res) {
-  const { email, password, nombre, etiqueta } = req.body;
+  const { 
+    email, 
+    password, 
+    nombre, 
+    etiqueta, 
+    rif_cedula, 
+    direccion_fiscal, 
+    direccion_entrega, 
+    telefono, 
+    linea_credito,
+    delivery_gratis // 🆕
+  } = req.body;
 
   if (!email || !password) {
     return res.status(400).json({ error: 'Email y password son requeridos' });
@@ -42,13 +54,26 @@ export async function createUser(req, res) {
 
     const { data, error } = await supabase
       .from('users')
-      .insert({ email, password_hash, nombre, etiqueta: etiqueta || 'distribuidor' })
-      .select('id, email, nombre, etiqueta, es_admin, activo, created_at')
+      .insert({
+        email,
+        password_hash,
+        nombre,
+        etiqueta: etiqueta || 'distribuidor',
+        rif_cedula: rif_cedula || null,
+        direccion_fiscal: direccion_fiscal || null,
+        direccion_entrega: direccion_entrega || null,
+        telefono: telefono || null,
+        linea_credito: linea_credito || 0,
+        delivery_gratis: delivery_gratis || false // 🆕
+      })
+      .select('*')
       .single();
 
     if (error) throw error;
 
-    res.status(201).json(data);
+    // No enviar password_hash en la respuesta
+    const { password_hash: _, ...usuarioSinPassword } = data;
+    res.status(201).json(usuarioSinPassword);
   } catch (err) {
     console.error('Error al crear usuario:', err);
     res.status(500).json({ error: 'Error del servidor' });
@@ -58,27 +83,55 @@ export async function createUser(req, res) {
 // PATCH /users/:id (admin) - editar
 export async function updateUser(req, res) {
   const { id } = req.params;
-  const { nombre, etiqueta, activo, password } = req.body;
+  const { 
+    nombre, 
+    etiqueta, 
+    activo, 
+    password, 
+    email,
+    rif_cedula, 
+    direccion_fiscal, 
+    direccion_entrega, 
+    telefono, 
+    linea_credito,
+    delivery_gratis // 🆕
+  } = req.body;
 
   try {
     const cambios = {};
+    
+    // Solo agregar al objeto los campos que vienen en el body
     if (nombre !== undefined) cambios.nombre = nombre;
+    if (email !== undefined) cambios.email = email;
     if (etiqueta !== undefined) cambios.etiqueta = etiqueta;
     if (activo !== undefined) cambios.activo = activo;
+    if (rif_cedula !== undefined) cambios.rif_cedula = rif_cedula;
+    if (direccion_fiscal !== undefined) cambios.direccion_fiscal = direccion_fiscal;
+    if (direccion_entrega !== undefined) cambios.direccion_entrega = direccion_entrega;
+    if (telefono !== undefined) cambios.telefono = telefono;
+    if (linea_credito !== undefined) cambios.linea_credito = linea_credito;
+    if (delivery_gratis !== undefined) cambios.delivery_gratis = delivery_gratis; // 🆕
     if (password) cambios.password_hash = await bcrypt.hash(password, 10);
+
+    // Si no hay cambios, evitar query innecesario
+    if (Object.keys(cambios).length === 0) {
+      return res.status(400).json({ error: 'No se enviaron campos para actualizar' });
+    }
 
     const { data, error } = await supabase
       .from('users')
       .update(cambios)
       .eq('id', id)
-      .select('id, email, nombre, etiqueta, es_admin, activo, created_at')
+      .select('*')
       .single();
 
     if (error || !data) {
       return res.status(404).json({ error: 'Usuario no encontrado' });
     }
 
-    res.json(data);
+    // No enviar password_hash en la respuesta
+    const { password_hash: _, ...usuarioSinPassword } = data;
+    res.json(usuarioSinPassword);
   } catch (err) {
     console.error('Error al actualizar usuario:', err);
     res.status(500).json({ error: 'Error del servidor' });
