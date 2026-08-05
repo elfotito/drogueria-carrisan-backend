@@ -19,7 +19,7 @@ export async function getProductos(req, res) {
       query = query.eq('marca_id', marca_id);
     }
 
-    const { data, error } = await query.order('nombre', { ascending: true });
+    const { data, error } = await query.order('nombre_comercial', { ascending: true });
 
     if (error) throw error;
 
@@ -105,4 +105,3 @@ export async function updateProducto(req, res) {
     res.status(500).json({ error: 'Error del servidor' });
   }
 }
-
