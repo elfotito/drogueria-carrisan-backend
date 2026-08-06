@@ -2,6 +2,31 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { supabase } from '../config/supabase.js';
 
+// POST /auth/check-email
+// Usado por el flujo de login de 2 pasos: primero se verifica si el correo
+// ya tiene cuenta, para decidir si mostrar el campo de contraseña o mandar
+// al usuario a /registro. No revela nada sensible, solo si existe o no.
+export async function checkEmail(req, res) {
+  const { email } = req.body;
+
+  if (!email) {
+    return res.status(400).json({ error: 'Email es requerido' });
+  }
+
+  try {
+    const { data: user } = await supabase
+      .from('users')
+      .select('id')
+      .eq('email', email.trim().toLowerCase())
+      .single();
+
+    res.json({ existe: !!user });
+  } catch (err) {
+    console.error('Error en checkEmail:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
 // POST /auth/login
 export async function login(req, res) {
   const { email, password } = req.body;
@@ -50,7 +75,7 @@ export async function login(req, res) {
   }
 }
 
-// POST /auth/register (solo admin crea usuarios)
+// POST /auth/register
 export async function register(req, res) {
   const { email, password, nombre, etiqueta, es_admin } = req.body;
 
