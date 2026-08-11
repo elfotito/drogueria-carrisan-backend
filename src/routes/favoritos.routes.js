@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { verifyJWT } from '../middlewares/auth.js';
+import { verifyJWT } from '../middleware/auth.js';
 import { 
   obtenerFavoritos, 
   toggleFavorito, 
