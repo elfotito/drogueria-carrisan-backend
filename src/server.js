@@ -45,7 +45,7 @@ app.use('/clientes', estadocuentaRoutes);
 app.use('/notifications', notificacionesRoutes);
 app.use('/lists', listasRoutes);
 app.use('/direcciones', direccionesRoutes);
-app.use('/api/favoritos', favoritosRoutes);
+app.use('/favoritos', favoritosRoutes);
 
 app.listen(PORT, () => {
   console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
