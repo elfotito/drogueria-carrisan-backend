@@ -14,6 +14,8 @@ import estadocuentaRoutes from './routes/estadocuenta.routes.js';
 import notificacionesRoutes from './routes/notificaciones.routes.js';
 import listasRoutes from './routes/listas.routes.js';
 import direccionesRoutes from './routes/direcciones.routes.js';
+import favoritosRoutes from './routes/favoritos.routes.js';
+
 
 dotenv.config();
 
@@ -43,6 +45,7 @@ app.use('/clientes', estadocuentaRoutes);
 app.use('/notifications', notificacionesRoutes);
 app.use('/lists', listasRoutes);
 app.use('/direcciones', direccionesRoutes);
+app.use('/api/favoritos', favoritosRoutes);
 
 app.listen(PORT, () => {
   console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
