@@ -2,10 +2,6 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { supabase } from '../config/supabase.js';
 
-// POST /auth/check-email
-// Usado por el flujo de login de 2 pasos: primero se verifica si el correo
-// ya tiene cuenta, para decidir si mostrar el campo de contraseña o mandar
-// al usuario a /registro. No revela nada sensible, solo si existe o no.
 export async function checkEmail(req, res) {
   const { email } = req.body;
 
