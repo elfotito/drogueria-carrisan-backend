@@ -31,12 +31,15 @@ function normalizarEstado(estado) {
 
 // POST /orders
 export async function createOrden(req, res) {
-  const { items } = req.body;
+  const { items, forma_pago } = req.body;
   const usuario_id = req.user.id;
 
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'Debe incluir al menos un item' });
   }
+
+  // forma_pago solo puede ser 'contado' o 'credito'. Si no viene, asumimos contado.
+  const formaPagoSolicitada = forma_pago === 'credito' ? 'credito' : 'contado';
 
   try {
     const productoIds = items.map(item => item.producto_id);
@@ -67,9 +70,57 @@ export async function createOrden(req, res) {
       };
     });
 
+    // -----------------------------------------------------------------
+    // Validación de crédito: NUNCA confiar en lo que mande el frontend.
+    // Si el cliente pidió 'credito', recalculamos su saldo disponible
+    // (linea_credito - deuda_actual) server-side antes de aceptarlo.
+    // -----------------------------------------------------------------
+    let forma_pago_final = 'contado';
+
+    if (formaPagoSolicitada === 'credito') {
+      const { data: cliente, error: errorCliente } = await supabase
+        .from('users')
+        .select('linea_credito')
+        .eq('id', usuario_id)
+        .single();
+
+      if (errorCliente || !cliente) throw errorCliente || new Error('Usuario no encontrado');
+
+      const { data: facturas, error: errorFacturas } = await supabase
+        .from('facturas')
+        .select('monto_facturado')
+        .eq('usuario_id', usuario_id);
+      if (errorFacturas) throw errorFacturas;
+
+      const { data: pagos, error: errorPagos } = await supabase
+        .from('pagos')
+        .select('monto')
+        .eq('usuario_id', usuario_id);
+      if (errorPagos) throw errorPagos;
+
+      const total_facturado = facturas.reduce((sum, f) => sum + Number(f.monto_facturado), 0);
+      const total_pagado = pagos.reduce((sum, p) => sum + Number(p.monto), 0);
+      const deuda_actual = total_facturado - total_pagado;
+      const saldo_disponible = Number(cliente.linea_credito) - deuda_actual;
+
+      if (saldo_disponible >= total_usd) {
+        forma_pago_final = 'credito';
+      }
+      // Si no alcanza el saldo, forma_pago_final se queda en 'contado'
+      // silenciosamente — el frontend ya debería haber ocultado la opción,
+      // esto es solo la última línea de defensa.
+    }
+
+    // Las órdenes a contado nacen esperando llegar a 'procesando' para
+    // habilitar el pago; estado_pago se setea ahí, no aquí (ver updateEstadoOrden).
     const { data: orden, error: errorOrden } = await supabase
       .from('ordenes')
-      .insert({ usuario_id, estado: 'pedido_creado', total_usd })
+      .insert({
+        usuario_id,
+        estado: 'pedido_creado',
+        total_usd,
+        forma_pago: forma_pago_final
+      })
       .select()
       .single();
 
@@ -95,11 +146,15 @@ export async function createOrden(req, res) {
       estado: 'pedido_creado'
     });
 
+    const mensajeCreacion = forma_pago_final === 'credito'
+      ? `Tu orden #${orden.id} por $${total_usd} fue recibida. Te avisaremos si hay algún ajuste en las cantidades.`
+      : `Tu orden #${orden.id} por $${total_usd} fue recibida. Te avisaremos cuando esté lista para procesar el pago.`;
+
     await crearNotificacion(
       usuario_id,
       'orden_creada',
       'Orden creada',
-      `Tu orden #${orden.id} por $${total_usd} fue recibida`,
+      mensajeCreacion,
       orden.id
     );
 
@@ -171,6 +226,77 @@ export async function getOrdenById(req, res) {
   }
 }
 
+// Mensajes de notificación por transición de estado, diferenciados por
+// forma_pago. Si una combinación no tiene mensaje especial acá, se usa
+// el genérico de LABELS_ESTADO como fallback.
+function mensajeParaTransicion(estado, forma_pago, ordenId) {
+  if (estado === 'procesando') {
+    if (forma_pago === 'contado') {
+      return `¡Tu orden #${ordenId} está lista! Ya puedes proceder con el pago.`;
+    }
+    // A crédito no se notifica el paso a 'procesando' (avanza y se
+    // encadena a 'preparando' en el mismo momento, ver abajo).
+    return null;
+  }
+  if (estado === 'enviado') {
+    return `Tu orden #${ordenId} salió de nuestro almacén rumbo a destino.`;
+  }
+  if (estado === 'entregado') {
+    return `Tu orden #${ordenId} fue entregada con éxito.`;
+  }
+  return `Tu orden #${ordenId} cambió a: ${LABELS_ESTADO[estado] || estado}`;
+}
+
+// Aplica un cambio de estado a una orden: actualiza fila, registra
+// historial y notifica. No hace la validación de ESTADOS_VALIDOS (eso
+// se hace una sola vez en el endpoint que llama a esta función).
+async function aplicarCambioEstado(orden, estado) {
+  const { data, error } = await supabase
+    .from('ordenes')
+    .update({ estado })
+    .eq('id', orden.id)
+    .select()
+    .single();
+
+  if (error || !data) throw error || new Error('Orden no encontrada al actualizar estado');
+
+  await supabase.from('ordenes_historial').insert({
+    orden_id: data.id,
+    estado
+  });
+
+  const mensaje = mensajeParaTransicion(estado, data.forma_pago, data.id);
+  if (mensaje) {
+    await crearNotificacion(data.usuario_id, 'estado_cambiado', 'Estado actualizado', mensaje, data.id);
+  }
+
+  return data;
+}
+
+// GET /orders/pendientes-pago — órdenes del usuario en 'procesando' a
+// contado que están esperando o fueron rechazadas (para la pantalla de
+// gestión de pagos, individual o multi-orden). Excluye las que ya están
+// 'reportado' (esperando verificación) o 'verificado'.
+export async function getOrdenesPendientesPago(req, res) {
+  const usuario_id = req.user.id;
+
+  try {
+    const { data, error } = await supabase
+      .from('ordenes')
+      .select('*, ordenes_items(*, productos(nombre_comercial))')
+      .eq('usuario_id', usuario_id)
+      .eq('forma_pago', 'contado')
+      .in('estado_pago', ['esperando', 'rechazado'])
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    console.error('Error al obtener órdenes pendientes de pago:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
 // PATCH /orders/:id/estado
 export async function updateEstadoOrden(req, res) {
   const { id } = req.params;
@@ -181,29 +307,37 @@ export async function updateEstadoOrden(req, res) {
   }
 
   try {
-    const { data, error } = await supabase
+    const { data: ordenActual, error: errorActual } = await supabase
       .from('ordenes')
-      .update({ estado })
+      .select('*')
       .eq('id', id)
-      .select()
       .single();
 
-    if (error || !data) {
+    if (errorActual || !ordenActual) {
       return res.status(404).json({ error: 'Orden no encontrada' });
     }
 
-    await supabase.from('ordenes_historial').insert({
-      orden_id: data.id,
-      estado
-    });
+    let data = await aplicarCambioEstado(ordenActual, estado);
 
-    await crearNotificacion(
-      data.usuario_id,
-      'estado_cambiado',
-      'Estado actualizado',
-      `Tu orden #${data.id} cambió a: ${LABELS_ESTADO[estado] || estado}`,
-      data.id
-    );
+    // ---------------------------------------------------------------
+    // Bifurcación crédito/contado al entrar a 'procesando':
+    // - credito: no espera pago, se encadena directo a 'preparando'.
+    // - contado: se abre la ventana de pago (estado_pago = 'esperando').
+    // ---------------------------------------------------------------
+    if (estado === 'procesando') {
+      if (data.forma_pago === 'credito') {
+        data = await aplicarCambioEstado(data, 'preparando');
+      } else {
+        const { data: actualizada, error: errorPago } = await supabase
+          .from('ordenes')
+          .update({ estado_pago: 'esperando' })
+          .eq('id', data.id)
+          .select()
+          .single();
+        if (errorPago) throw errorPago;
+        data = actualizada;
+      }
+    }
 
     res.json(data);
   } catch (err) {
