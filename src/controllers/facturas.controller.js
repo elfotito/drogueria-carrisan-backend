@@ -115,6 +115,51 @@ export async function updateFactura(req, res) {
   }
 }
 
+// DELETE /facturas/:id (admin) - permite corregir una factura generada
+// automáticamente (por ejemplo, tras verificar un reporte de pago) o una
+// factura manual. Revierte también el/los pagos que la hayan saldado.
+export async function deleteFactura(req, res) {
+  const { id } = req.params;
+
+  try {
+    const { data: factura, error: errorFactura } = await supabase
+      .from('facturas')
+      .select('id, usuario_id, numero_factura')
+      .eq('id', id)
+      .single();
+
+    if (errorFactura || !factura) {
+      return res.status(404).json({ error: 'Factura no encontrada' });
+    }
+
+    // 1. Borrar pagos vinculados a esta factura (vía pago_facturas)
+    const { data: vinculosPago, error: errorVinculosPago } = await supabase
+      .from('pago_facturas')
+      .select('pago_id')
+      .eq('factura_id', id);
+
+    if (errorVinculosPago) throw errorVinculosPago;
+
+    if (vinculosPago && vinculosPago.length > 0) {
+      const pagoIds = vinculosPago.map(v => v.pago_id);
+      await supabase.from('pago_facturas').delete().eq('factura_id', id);
+      await supabase.from('pagos').delete().in('id', pagoIds);
+    }
+
+    // 2. Desvincular órdenes de la factura (no se borran las órdenes)
+    await supabase.from('factura_ordenes').delete().eq('factura_id', id);
+
+    // 3. Borrar la factura
+    const { error: errorDelete } = await supabase.from('facturas').delete().eq('id', id);
+    if (errorDelete) throw errorDelete;
+
+    res.json({ message: 'Factura eliminada', factura_id: Number(id) });
+  } catch (err) {
+    console.error('Error al eliminar factura:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
 // GET /ordenes-sin-facturar/:usuario_id (admin) - helper para armar una factura nueva
 export async function getOrdenesSinFacturar(req, res) {
   const { usuario_id } = req.params;
