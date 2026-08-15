@@ -21,4 +21,5 @@ router.get('/', verifyJWT, verifyAdmin, getReportesPago);
 router.patch('/:id/verificar', verifyJWT, verifyAdmin, verificarReportePago);
 router.patch('/:id/rechazar', verifyJWT, verifyAdmin, rechazarReportePago);
 
+
 export default router;
