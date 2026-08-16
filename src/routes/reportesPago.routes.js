@@ -13,12 +13,14 @@ const router = Router();
 // Cliente: crear su reporte de pago (una o varias órdenes)
 router.post('/', verifyJWT, createReportePago);
 
-// Cliente o admin: ver un reporte puntual (el controller valida dueño/admin)
-router.get('/:id', verifyJWT, getReportePagoById);
-
-// Admin: cola de verificación y acciones
+// Admin: cola de verificación y acciones — TODAS las rutas específicas
+// van antes que '/:id', para que Express no las confunda con un id.
 router.get('/', verifyJWT, verifyAdmin, getReportesPago);
 router.patch('/:id/verificar', verifyJWT, verifyAdmin, verificarReportePago);
 router.patch('/:id/rechazar', verifyJWT, verifyAdmin, rechazarReportePago);
+
+// Cliente o admin: ver un reporte puntual — va AL FINAL porque
+// ':id' es un comodín que atraparía cualquier ruta declarada después.
+router.get('/:id', verifyJWT, getReportePagoById);
 
 export default router;
