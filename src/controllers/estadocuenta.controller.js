@@ -79,6 +79,7 @@ export async function getResumenClientes(req, res) {
 
     const resumen = await Promise.all(
       clientes.map(async (cliente) => {
+        // Deuda real: órdenes activas sin verificar (nuestra fórmula nueva)
         const { data: ordenesDeuda } = await supabase
           .from('ordenes')
           .select('total_usd')
@@ -88,11 +89,29 @@ export async function getResumenClientes(req, res) {
 
         const deuda_actual = (ordenesDeuda || []).reduce((sum, o) => sum + Number(o.total_usd), 0);
 
+        // Facturado y pagado: históricos, solo para mostrar en la tabla —
+        // no se usan para calcular deuda_actual, pero EstadoCuentaAdmin.jsx
+        // ya los pinta en columnas propias.
+        const { data: facturas } = await supabase
+          .from('facturas')
+          .select('monto_facturado')
+          .eq('usuario_id', cliente.id);
+
+        const { data: pagos } = await supabase
+          .from('pagos')
+          .select('monto')
+          .eq('usuario_id', cliente.id);
+
+        const total_facturado = (facturas || []).reduce((sum, f) => sum + Number(f.monto_facturado), 0);
+        const total_pagado = (pagos || []).reduce((sum, p) => sum + Number(p.monto), 0);
+
         return {
           id: cliente.id,
           nombre: cliente.nombre,
           email: cliente.email,
           linea_credito: Number(cliente.linea_credito || 0),
+          total_facturado,
+          total_pagado,
           deuda_actual,
           saldo: Number(cliente.linea_credito || 0) - deuda_actual,
         };
