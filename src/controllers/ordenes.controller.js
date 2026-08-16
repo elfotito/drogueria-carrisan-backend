@@ -92,15 +92,16 @@ export async function createOrden(req, res) {
         .eq('usuario_id', usuario_id);
       if (errorFacturas) throw errorFacturas;
 
-      const { data: pagos, error: errorPagos } = await supabase
-        .from('pagos')
-        .select('monto')
-        .eq('usuario_id', usuario_id);
-      if (errorPagos) throw errorPagos;
+      const { data: ordenesDeuda, error: errorOrdenesDeuda } = await supabase
+      .from('ordenes')
+      .select('total_usd')
+      .eq('usuario_id', usuario_id)
+      .neq('estado', 'cancelado')
+      .neq('estado_pago', 'verificado');
 
-      const total_facturado = facturas.reduce((sum, f) => sum + Number(f.monto_facturado), 0);
-      const total_pagado = pagos.reduce((sum, p) => sum + Number(p.monto), 0);
-      const deuda_actual = total_facturado - total_pagado;
+    if (errorOrdenesDeuda) throw errorOrdenesDeuda;
+
+    const deuda_actual = ordenesDeuda.reduce((sum, o) => sum + Number(o.total_usd), 0);
       const saldo_disponible = Number(cliente.linea_credito) - deuda_actual;
 
       if (saldo_disponible >= total_usd) {
