@@ -1,61 +1,65 @@
 import { supabase } from '../config/supabase.js';
 
-// GET /clientes/:id/estado-cuenta (admin)
+// GET /:id/estado-cuenta (admin ve cualquiera, usuario se ve a sí mismo)
 export async function getEstadoCuenta(req, res) {
   const { id } = req.params;
+  const usuario_id = Number(id);
 
-  // Si no es admin, solo puede ver su propio estado de cuenta
-  if (!req.user.es_admin && req.user.id !== Number(id)) {
+  if (!req.user.es_admin && req.user.id !== usuario_id) {
     return res.status(403).json({ error: 'No autorizado' });
   }
 
   try {
-    // 1. Datos del cliente (incluye su línea de crédito)
     const { data: cliente, error: errorCliente } = await supabase
       .from('users')
       .select('id, nombre, email, linea_credito')
-      .eq('id', id)
+      .eq('id', usuario_id)
       .single();
 
     if (errorCliente || !cliente) {
       return res.status(404).json({ error: 'Cliente no encontrado' });
     }
 
-    // 2. Todas sus facturas
+    // Órdenes activas que aún pesan en la deuda: no canceladas y no verificadas.
+    // Esto cubre tanto contado (esperando/reportado/rechazado) como crédito
+    // (estado_pago null hasta que algún día se facture).
+    const { data: ordenesDeuda, error: errorOrdenes } = await supabase
+      .from('ordenes')
+      .select('id, total_usd, forma_pago, estado, estado_pago, created_at')
+      .eq('usuario_id', usuario_id)
+      .neq('estado', 'cancelado')
+      .neq('estado_pago', 'verificado');
+
+    if (errorOrdenes) throw errorOrdenes;
+
+    const deuda_actual = ordenesDeuda.reduce((sum, o) => sum + Number(o.total_usd), 0);
+
     const { data: facturas, error: errorFacturas } = await supabase
       .from('facturas')
-      .select('*, factura_ordenes(orden_id)')
-      .eq('usuario_id', id)
+      .select('*, factura_ordenes(orden_id, ordenes(id, ordenes_items(*, productos(nombre_comercial))))')
+      .eq('usuario_id', usuario_id)
       .order('created_at', { ascending: false });
 
     if (errorFacturas) throw errorFacturas;
 
-    // 3. Todos sus pagos
     const { data: pagos, error: errorPagos } = await supabase
       .from('pagos')
       .select('*, pago_facturas(factura_id)')
-      .eq('usuario_id', id)
+      .eq('usuario_id', usuario_id)
       .order('created_at', { ascending: false });
 
     if (errorPagos) throw errorPagos;
 
-    // 4. Calcular totales
-    const total_facturado = facturas.reduce((sum, f) => sum + Number(f.monto_facturado), 0);
-    const total_pagado = pagos.reduce((sum, p) => sum + Number(p.monto), 0);
-    const deuda_actual = total_facturado - total_pagado;
-    const saldo = Number(cliente.linea_credito) - deuda_actual;
-
     res.json({
-      cliente,
+      cliente: { id: cliente.id, nombre: cliente.nombre, email: cliente.email },
       resumen: {
-        total_facturado,
-        total_pagado,
+        linea_credito: Number(cliente.linea_credito || 0),
         deuda_actual,
-        linea_credito: Number(cliente.linea_credito),
-        saldo // positivo = crédito disponible, negativo = excedido/debe sin crédito
+        saldo: Number(cliente.linea_credito || 0) - deuda_actual,
       },
+      ordenes_pendientes: ordenesDeuda,
       facturas,
-      pagos
+      pagos,
     });
   } catch (err) {
     console.error('Error al obtener estado de cuenta:', err);
@@ -63,48 +67,37 @@ export async function getEstadoCuenta(req, res) {
   }
 }
 
-// GET /clientes/estado-cuenta (admin) - resumen de TODOS los clientes, para la pestaña principal
+// GET /estado-cuenta (admin) — resumen de todos los clientes con línea de crédito
 export async function getResumenClientes(req, res) {
   try {
     const { data: clientes, error: errorClientes } = await supabase
       .from('users')
       .select('id, nombre, email, linea_credito')
-      .order('nombre', { ascending: true });
+      .gt('linea_credito', 0);
 
     if (errorClientes) throw errorClientes;
 
-    const { data: facturas, error: errorFacturas } = await supabase
-      .from('facturas')
-      .select('usuario_id, monto_facturado');
+    const resumen = await Promise.all(
+      clientes.map(async (cliente) => {
+        const { data: ordenesDeuda } = await supabase
+          .from('ordenes')
+          .select('total_usd')
+          .eq('usuario_id', cliente.id)
+          .neq('estado', 'cancelado')
+          .neq('estado_pago', 'verificado');
 
-    if (errorFacturas) throw errorFacturas;
+        const deuda_actual = (ordenesDeuda || []).reduce((sum, o) => sum + Number(o.total_usd), 0);
 
-    const { data: pagos, error: errorPagos } = await supabase
-      .from('pagos')
-      .select('usuario_id, monto');
-
-    if (errorPagos) throw errorPagos;
-
-    const resumen = clientes.map(cliente => {
-      const total_facturado = facturas
-        .filter(f => f.usuario_id === cliente.id)
-        .reduce((sum, f) => sum + Number(f.monto_facturado), 0);
-
-      const total_pagado = pagos
-        .filter(p => p.usuario_id === cliente.id)
-        .reduce((sum, p) => sum + Number(p.monto), 0);
-
-      const deuda_actual = total_facturado - total_pagado;
-      const saldo = Number(cliente.linea_credito) - deuda_actual;
-
-      return {
-        ...cliente,
-        total_facturado,
-        total_pagado,
-        deuda_actual,
-        saldo
-      };
-    });
+        return {
+          id: cliente.id,
+          nombre: cliente.nombre,
+          email: cliente.email,
+          linea_credito: Number(cliente.linea_credito || 0),
+          deuda_actual,
+          saldo: Number(cliente.linea_credito || 0) - deuda_actual,
+        };
+      })
+    );
 
     res.json(resumen);
   } catch (err) {
