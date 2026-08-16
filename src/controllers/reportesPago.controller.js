@@ -20,15 +20,12 @@ export async function createReportePago(req, res) {
   }
 
   try {
-    // 1. Traer las órdenes y validar que sean del usuario, a contado,
-    //    y estén en un estado válido para reportar pago.
     const { data: ordenes, error: errorOrdenes } = await supabase
       .from('ordenes')
       .select('id, usuario_id, forma_pago, estado_pago, total_usd')
       .in('id', orden_ids);
 
     if (errorOrdenes) throw errorOrdenes;
-
     if (!ordenes || ordenes.length !== orden_ids.length) {
       return res.status(404).json({ error: 'Una o más órdenes no existen' });
     }
@@ -45,9 +42,6 @@ export async function createReportePago(req, res) {
       }
     }
 
-    // 2. Verificar que ninguna ya esté vinculada a otro reporte pendiente
-    //    (por si el UNIQUE de la tabla puente no alcanzó a limpiarse en
-    //    un rechazo anterior — doble chequeo defensivo).
     const { data: vinculosExistentes, error: errorVinculos } = await supabase
       .from('reporte_pago_ordenes')
       .select('orden_id')
@@ -58,7 +52,6 @@ export async function createReportePago(req, res) {
       return res.status(409).json({ error: 'Una o más órdenes ya tienen un reporte de pago asociado' });
     }
 
-    // 3. Tasa vigente y cálculo de montos
     const { data: tasa, error: errorTasa } = await supabase
       .from('tasa_cambio')
       .select('usd_a_ves')
@@ -74,7 +67,6 @@ export async function createReportePago(req, res) {
     const tasa_usada = Number(tasa.usd_a_ves);
     const monto_bs = monto_usd * tasa_usada;
 
-    // 4. Crear el reporte
     const { data: reporte, error: errorReporte } = await supabase
       .from('reportes_pago')
       .insert({
@@ -90,7 +82,6 @@ export async function createReportePago(req, res) {
 
     if (errorReporte) throw errorReporte;
 
-    // 5. Vincular órdenes
     const vinculos = orden_ids.map(orden_id => ({ reporte_pago_id: reporte.id, orden_id }));
     const { error: errorInsertVinculos } = await supabase
       .from('reporte_pago_ordenes')
@@ -104,7 +95,6 @@ export async function createReportePago(req, res) {
       throw errorInsertVinculos;
     }
 
-    // 6. Marcar las órdenes como 'reportado'
     const { error: errorUpdateOrdenes } = await supabase
       .from('ordenes')
       .update({ estado_pago: 'reportado' })
@@ -130,6 +120,7 @@ export async function createReportePago(req, res) {
 // GET /reportes-pago (admin) — cola de verificación, filtrable por estado
 export async function getReportesPago(req, res) {
   const { estado } = req.query;
+
   try {
     let query = supabase
       .from('reportes_pago')
@@ -139,8 +130,10 @@ export async function getReportesPago(req, res) {
     if (estado) {
       query = query.eq('estado', estado);
     }
+
     const { data, error } = await query;
     if (error) throw error;
+
     res.json(data);
   } catch (err) {
     console.error('Error al obtener reportes de pago:', err);
@@ -155,14 +148,13 @@ export async function getReportePagoById(req, res) {
   try {
     const { data, error } = await supabase
       .from('reportes_pago')
-      .select('*, users(id, nombre, email), reporte_pago_ordenes(orden_id, ordenes(*))')
+      .select('*, users!reportes_pago_usuario_id_fkey(id, nombre, email), reporte_pago_ordenes(orden_id, ordenes(*))')
       .eq('id', id)
       .single();
 
     if (error || !data) {
       return res.status(404).json({ error: 'Reporte no encontrado' });
     }
-
     if (!req.user.es_admin && data.usuario_id !== req.user.id) {
       return res.status(403).json({ error: 'No autorizado' });
     }
@@ -204,7 +196,6 @@ export async function verificarReportePago(req, res) {
 
     const orden_ids = reporte.reporte_pago_ordenes.map(v => v.orden_id);
 
-    // 1. Crear la factura agrupando las órdenes del reporte
     const { data: factura, error: errorFactura } = await supabase
       .from('facturas')
       .insert({
@@ -229,7 +220,6 @@ export async function verificarReportePago(req, res) {
       throw errorFacturaOrdenes;
     }
 
-    // 2. Crear el pago que salda la factura de inmediato (sin parciales)
     const { data: pago, error: errorPago } = await supabase
       .from('pagos')
       .insert({
@@ -247,11 +237,11 @@ export async function verificarReportePago(req, res) {
     const { error: errorPagoFactura } = await supabase
       .from('pago_facturas')
       .insert({ pago_id: pago.id, factura_id: factura.id });
+
     if (errorPagoFactura) throw errorPagoFactura;
 
     await supabase.from('facturas').update({ estado: 'pagada' }).eq('id', factura.id);
 
-    // 3. Marcar el reporte como verificado
     const { data: reporteActualizado, error: errorUpdateReporte } = await supabase
       .from('reportes_pago')
       .update({
@@ -265,7 +255,6 @@ export async function verificarReportePago(req, res) {
 
     if (errorUpdateReporte) throw errorUpdateReporte;
 
-    // 4. Avanzar las órdenes: estado_pago -> verificado, estado -> preparando
     await supabase.from('ordenes').update({ estado_pago: 'verificado' }).in('id', orden_ids);
 
     for (const orden_id of orden_ids) {
@@ -323,9 +312,6 @@ export async function rechazarReportePago(req, res) {
 
     if (errorUpdate) throw errorUpdate;
 
-    // Liberamos las órdenes: vuelven a 'rechazado' para que el cliente
-    // pueda reintentar el reporte, y quitamos el vínculo del puente
-    // para que no bloqueen un nuevo reporte (UNIQUE en orden_id).
     await supabase.from('ordenes').update({ estado_pago: 'rechazado' }).in('id', orden_ids);
     await supabase.from('reporte_pago_ordenes').delete().eq('reporte_pago_id', id);
 
