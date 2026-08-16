@@ -130,17 +130,15 @@ export async function createReportePago(req, res) {
 // GET /reportes-pago (admin) — cola de verificación, filtrable por estado
 export async function getReportesPago(req, res) {
   const { estado } = req.query;
-
   try {
     let query = supabase
       .from('reportes_pago')
-      .select('*, users(id, nombre, email), reporte_pago_ordenes(orden_id)')
+      .select('*, users!reportes_pago_usuario_id_fkey(id, nombre, email), reporte_pago_ordenes(orden_id)')
       .order('created_at', { ascending: false });
 
     if (estado) {
       query = query.eq('estado', estado);
     }
-
     const { data, error } = await query;
     if (error) throw error;
     res.json(data);
