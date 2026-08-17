@@ -54,9 +54,10 @@ export async function login(req, res) {
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
 
-    // 3. Generar el token JWT
+    // 3. Generar el token JWT (incluye token_version para poder revocar
+    // esta sesión específica más adelante sin esperar a que expire)
     const token = jwt.sign(
-      { id: user.id, email: user.email, es_admin: user.es_admin, nombre: user.nombre },
+      { id: user.id, email: user.email, es_admin: user.es_admin, nombre: user.nombre, token_version: user.token_version ?? 0 },
       process.env.JWT_SECRET,
       { expiresIn: '24h' }
     );

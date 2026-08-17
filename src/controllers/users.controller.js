@@ -120,6 +120,24 @@ export async function updateUser(req, res) {
       return res.status(400).json({ error: 'No se enviaron campos para actualizar' });
     }
 
+    // -------------------------------------------------------------------
+    // Revocación automática de sesiones: si se cambia el password o se
+    // desactiva al usuario, incrementamos token_version. Cualquier JWT
+    // emitido antes de este momento dejará de servir en la próxima
+    // petición, sin esperar a que expire (verifyJWT compara versiones).
+    // -------------------------------------------------------------------
+    const debeRevocarSesiones = password !== undefined || activo === false;
+
+    if (debeRevocarSesiones) {
+      const { data: actual } = await supabase
+        .from('users')
+        .select('token_version')
+        .eq('id', id)
+        .single();
+
+      cambios.token_version = (actual?.token_version ?? 0) + 1;
+    }
+
     const { data, error } = await supabase
       .from('users')
       .update(cambios)
