@@ -10,4 +10,6 @@ router.get('/estado-cuenta', verifyJWT, verifyAdmin, getResumenClientes);
 // Admin ve cualquier cliente, usuario normal solo se ve a sí mismo
 router.get('/:id/estado-cuenta', verifyJWT, getEstadoCuenta);
 
+router.get('/:id/estado-cuenta/comparativa', verifyJWT, getComparativaMensual);
+
 export default router;
