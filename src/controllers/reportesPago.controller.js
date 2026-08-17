@@ -196,17 +196,20 @@ export async function verificarReportePago(req, res) {
 
     const orden_ids = reporte.reporte_pago_ordenes.map(v => v.orden_id);
 
-    const { data: factura, error: errorFactura } = await supabase
-      .from('facturas')
-      .insert({
-        usuario_id: reporte.usuario_id,
-        numero_factura,
-        monto_facturado: reporte.monto_usd,
-        nota: nota || `Generada automáticamente por reporte de pago #${reporte.id}`,
-        created_by: req.user.id
-      })
-      .select()
-      .single();
+
+const { data: pago, error: errorPago } = await supabase
+  .from('pagos')
+  .insert({
+    usuario_id: reporte.usuario_id,
+    monto: reporte.monto_usd,
+    monto_bs: reporte.monto_bs,        // 🆕
+    tasa_usada: reporte.tasa_usada,    // 🆕
+    tipo: 'reporte_cliente',
+    detalle: `Pago verificado desde reporte #${reporte.id}`,
+    created_by: req.user.id
+  })
+  .select()
+  .single();
 
     if (errorFactura) throw errorFactura;
 
