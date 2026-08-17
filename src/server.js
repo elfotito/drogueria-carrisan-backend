@@ -64,6 +64,7 @@ app.use('/notifications', notificacionesRoutes);
 app.use('/lists', listasRoutes);
 app.use('/direcciones', direccionesRoutes);
 app.use('/favoritos', favoritosRoutes);
+app.use('/uploads', uploadsRoutes);
 
 app.listen(PORT, () => {
   console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
