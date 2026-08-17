@@ -18,6 +18,7 @@ import listasRoutes from './routes/listas.routes.js';
 import direccionesRoutes from './routes/direcciones.routes.js';
 import favoritosRoutes from './routes/favoritos.routes.js';
 import { authLimiter, apiLimiter } from './middleware/rateLimit.js';
+import uploadsRoutes from './routes/uploads.routes.js';
 
 dotenv.config();
 
