@@ -67,6 +67,58 @@ export async function getEstadoCuenta(req, res) {
   }
 }
 
+// GET /:id/estado-cuenta/comparativa
+export async function getComparativaMensual(req, res) {
+  const { id } = req.params;
+  const usuario_id = Number(id);
+
+  if (!req.user.es_admin && req.user.id !== usuario_id) {
+    return res.status(403).json({ error: 'No autorizado' });
+  }
+
+  try {
+    const ahora = new Date();
+    const inicioMesActual = new Date(ahora.getFullYear(), ahora.getMonth(), 1).toISOString();
+    const inicioMesPasado = new Date(ahora.getFullYear(), ahora.getMonth() - 1, 1).toISOString();
+    const finMesPasado = inicioMesActual;
+
+    const { data: ordenesMesActual, error: err1 } = await supabase
+      .from('ordenes')
+      .select('total_usd')
+      .eq('usuario_id', usuario_id)
+      .neq('estado', 'cancelado')
+      .gte('created_at', inicioMesActual);
+
+    if (err1) throw err1;
+
+    const { data: ordenesMesPasado, error: err2 } = await supabase
+      .from('ordenes')
+      .select('total_usd')
+      .eq('usuario_id', usuario_id)
+      .neq('estado', 'cancelado')
+      .gte('created_at', inicioMesPasado)
+      .lt('created_at', finMesPasado);
+
+    if (err2) throw err2;
+
+    const totalMesActual = ordenesMesActual.reduce((sum, o) => sum + Number(o.total_usd), 0);
+    const totalMesPasado = ordenesMesPasado.reduce((sum, o) => sum + Number(o.total_usd), 0);
+
+    const variacionPorcentaje = totalMesPasado > 0
+      ? ((totalMesActual - totalMesPasado) / totalMesPasado) * 100
+      : null; // sin mes pasado como referencia, no hay variación calculable
+
+    res.json({
+      mes_actual: totalMesActual,
+      mes_pasado: totalMesPasado,
+      variacion_porcentaje: variacionPorcentaje,
+    });
+  } catch (err) {
+    console.error('Error al calcular comparativa mensual:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
 // GET /estado-cuenta (admin) — resumen de todos los clientes con línea de crédito
 export async function getResumenClientes(req, res) {
   try {
