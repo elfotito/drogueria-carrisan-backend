@@ -32,11 +32,11 @@ export async function login(req, res) {
   }
 
   try {
-    // 1. Buscar el usuario por email
+    // 1. Buscar el usuario por email (normalizado igual que en checkEmail/register)
     const { data: user, error } = await supabase
       .from('users')
       .select('*')
-      .eq('email', email)
+      .eq('email', email.trim().toLowerCase())
       .single();
 
     if (error || !user) {
@@ -73,18 +73,24 @@ export async function login(req, res) {
 
 // POST /auth/register
 export async function register(req, res) {
-  const { email, password, nombre, etiqueta, es_admin } = req.body;
+  // es_admin NUNCA se lee del body: si se aceptara del cliente, cualquiera
+  // podría auto-registrarse como administrador llamando a este endpoint
+  // directamente. Los admins solo se promueven desde el panel (users.controller,
+  // ruta protegida con verifyAdmin).
+  const { email, password, nombre, etiqueta } = req.body;
 
   if (!email || !password) {
     return res.status(400).json({ error: 'Email y password son requeridos' });
   }
 
   try {
+    const emailNormalizado = email.trim().toLowerCase();
+
     // 1. Verificar que el email no exista ya
     const { data: existente } = await supabase
       .from('users')
       .select('id')
-      .eq('email', email)
+      .eq('email', emailNormalizado)
       .single();
 
     if (existente) {
@@ -94,15 +100,15 @@ export async function register(req, res) {
     // 2. Hashear el password (nunca guardamos texto plano)
     const password_hash = await bcrypt.hash(password, 10);
 
-    // 3. Insertar el nuevo usuario
+    // 3. Insertar el nuevo usuario — es_admin siempre false al registrarse
     const { data: nuevoUsuario, error } = await supabase
       .from('users')
       .insert({
-        email,
+        email: emailNormalizado,
         password_hash,
         nombre: nombre || null,
         etiqueta: etiqueta || 'distribuidor',
-        es_admin: es_admin || false
+        es_admin: false
       })
       .select()
       .single();

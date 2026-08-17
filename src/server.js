@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import dotenv from 'dotenv';
 import authRoutes from './routes/auth.routes.js';
 import marcasRoutes from './routes/marcas.routes.js';
@@ -16,18 +17,32 @@ import notificacionesRoutes from './routes/notificaciones.routes.js';
 import listasRoutes from './routes/listas.routes.js';
 import direccionesRoutes from './routes/direcciones.routes.js';
 import favoritosRoutes from './routes/favoritos.routes.js';
-
+import { authLimiter, apiLimiter } from './middleware/rateLimit.js';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+
+const allowedOrigins = process.env.FRONTEND_URL
+  ? process.env.FRONTEND_URL.split(',').map(o => o.trim())
+  : ['http://localhost:5173'];
+
+if (!process.env.FRONTEND_URL) {
+  console.warn('⚠️  FRONTEND_URL no está definida — usando solo http://localhost:5173. Configúrala en producción.');
+}
+
+app.use(helmet());
 app.use(cors({
-  origin: process.env.FRONTEND_URL || '*',
+  origin: allowedOrigins,
   credentials: true
 }));
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
+
+// Rate limiting: estricto en auth, general en el resto de la API.
+app.use('/auth', authLimiter);
+app.use(apiLimiter);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'OK' });

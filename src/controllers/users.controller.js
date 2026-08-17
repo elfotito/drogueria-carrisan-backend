@@ -40,10 +40,12 @@ export async function createUser(req, res) {
   }
 
   try {
+    const emailNormalizado = email.trim().toLowerCase();
+
     const { data: existente } = await supabase
       .from('users')
       .select('id')
-      .eq('email', email)
+      .eq('email', emailNormalizado)
       .single();
 
     if (existente) {
@@ -55,7 +57,7 @@ export async function createUser(req, res) {
     const { data, error } = await supabase
       .from('users')
       .insert({
-        email,
+        email: emailNormalizado,
         password_hash,
         nombre,
         etiqueta: etiqueta || 'distribuidor',
@@ -102,7 +104,7 @@ export async function updateUser(req, res) {
     
     // Solo agregar al objeto los campos que vienen en el body
     if (nombre !== undefined) cambios.nombre = nombre;
-    if (email !== undefined) cambios.email = email;
+    if (email !== undefined) cambios.email = email.trim().toLowerCase();
     if (etiqueta !== undefined) cambios.etiqueta = etiqueta;
     if (activo !== undefined) cambios.activo = activo;
     if (rif_cedula !== undefined) cambios.rif_cedula = rif_cedula;
