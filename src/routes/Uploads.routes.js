@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { subirComprobante } from '../controllers/uploads.controller.js';
+import { subirComprobante } from '../controllers/Uploads.controller.js';
 import { verifyJWT } from '../middleware/auth.js';
 
 const upload = multer({
