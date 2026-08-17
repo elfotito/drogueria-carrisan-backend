@@ -181,6 +181,7 @@ export async function verificarReportePago(req, res) {
   }
 
   try {
+    // 1. Obtener el reporte con sus órdenes
     const { data: reporte, error: errorReporte } = await supabase
       .from('reportes_pago')
       .select('*, reporte_pago_ordenes(orden_id)')
@@ -196,24 +197,30 @@ export async function verificarReportePago(req, res) {
 
     const orden_ids = reporte.reporte_pago_ordenes.map(v => v.orden_id);
 
-
-const { data: pago, error: errorPago } = await supabase
-  .from('pagos')
-  .insert({
-    usuario_id: reporte.usuario_id,
-    monto: reporte.monto_usd,
-    monto_bs: reporte.monto_bs,        // 🆕
-    tasa_usada: reporte.tasa_usada,    // 🆕
-    tipo: 'reporte_cliente',
-    detalle: `Pago verificado desde reporte #${reporte.id}`,
-    created_by: req.user.id
-  })
-  .select()
-  .single();
+    // 2. Crear la factura
+    const { data: factura, error: errorFactura } = await supabase
+      .from('facturas')
+      .insert({
+        usuario_id: reporte.usuario_id,
+        numero_factura,
+        monto: reporte.monto_usd,
+        monto_bs: reporte.monto_bs,
+        tasa_usada: reporte.tasa_usada,
+        estado: 'pendiente',
+        created_by: req.user.id,
+        nota: nota || null
+      })
+      .select()
+      .single();
 
     if (errorFactura) throw errorFactura;
 
-    const registrosFacturaOrdenes = orden_ids.map(orden_id => ({ factura_id: factura.id, orden_id }));
+    // 3. Vincular factura con órdenes
+    const registrosFacturaOrdenes = orden_ids.map(orden_id => ({ 
+      factura_id: factura.id, 
+      orden_id 
+    }));
+    
     const { error: errorFacturaOrdenes } = await supabase
       .from('factura_ordenes')
       .insert(registrosFacturaOrdenes);
@@ -223,11 +230,14 @@ const { data: pago, error: errorPago } = await supabase
       throw errorFacturaOrdenes;
     }
 
+    // 4. Crear el pago
     const { data: pago, error: errorPago } = await supabase
       .from('pagos')
       .insert({
         usuario_id: reporte.usuario_id,
         monto: reporte.monto_usd,
+        monto_bs: reporte.monto_bs,
+        tasa_usada: reporte.tasa_usada,
         tipo: 'reporte_cliente',
         detalle: `Pago verificado desde reporte #${reporte.id} (Bs. ${Number(reporte.monto_bs).toFixed(2)} a tasa ${reporte.tasa_usada})`,
         created_by: req.user.id
@@ -237,14 +247,25 @@ const { data: pago, error: errorPago } = await supabase
 
     if (errorPago) throw errorPago;
 
+    // 5. Vincular pago con factura
     const { error: errorPagoFactura } = await supabase
       .from('pago_facturas')
-      .insert({ pago_id: pago.id, factura_id: factura.id });
+      .insert({ 
+        pago_id: pago.id, 
+        factura_id: factura.id 
+      });
 
     if (errorPagoFactura) throw errorPagoFactura;
 
-    await supabase.from('facturas').update({ estado: 'pagada' }).eq('id', factura.id);
+    // 6. Marcar factura como pagada
+    const { error: errorUpdateFactura } = await supabase
+      .from('facturas')
+      .update({ estado: 'pagada' })
+      .eq('id', factura.id);
 
+    if (errorUpdateFactura) throw errorUpdateFactura;
+
+    // 7. Actualizar el reporte
     const { data: reporteActualizado, error: errorUpdateReporte } = await supabase
       .from('reportes_pago')
       .update({
@@ -258,13 +279,34 @@ const { data: pago, error: errorPago } = await supabase
 
     if (errorUpdateReporte) throw errorUpdateReporte;
 
-    await supabase.from('ordenes').update({ estado_pago: 'verificado' }).in('id', orden_ids);
+    // 8. Actualizar órdenes
+    const { error: errorUpdatePagoOrdenes } = await supabase
+      .from('ordenes')
+      .update({ estado_pago: 'verificado' })
+      .in('id', orden_ids);
 
+    if (errorUpdatePagoOrdenes) throw errorUpdatePagoOrdenes;
+
+    // 9. Avanzar órdenes a 'preparando'
     for (const orden_id of orden_ids) {
-      await supabase.from('ordenes').update({ estado: 'preparando' }).eq('id', orden_id);
-      await supabase.from('ordenes_historial').insert({ orden_id, estado: 'preparando' });
+      const { error: errorUpdateEstado } = await supabase
+        .from('ordenes')
+        .update({ estado: 'preparando' })
+        .eq('id', orden_id);
+
+      if (errorUpdateEstado) throw errorUpdateEstado;
+
+      const { error: errorHistorial } = await supabase
+        .from('ordenes_historial')
+        .insert({ 
+          orden_id, 
+          estado: 'preparando' 
+        });
+
+      if (errorHistorial) throw errorHistorial;
     }
 
+    // 10. Notificar al cliente
     await crearNotificacion(
       reporte.usuario_id,
       'pago_verificado',
@@ -273,7 +315,12 @@ const { data: pago, error: errorPago } = await supabase
       null
     );
 
-    res.json({ reporte: reporteActualizado, factura, pago, orden_ids });
+    res.json({ 
+      reporte: reporteActualizado, 
+      factura, 
+      pago, 
+      orden_ids 
+    });
   } catch (err) {
     console.error('Error al verificar reporte de pago:', err);
     res.status(500).json({ error: 'Error del servidor' });
@@ -315,8 +362,21 @@ export async function rechazarReportePago(req, res) {
 
     if (errorUpdate) throw errorUpdate;
 
-    await supabase.from('ordenes').update({ estado_pago: 'rechazado' }).in('id', orden_ids);
-    await supabase.from('reporte_pago_ordenes').delete().eq('reporte_pago_id', id);
+    // Actualizar estado de las órdenes
+    const { error: errorUpdateOrdenes } = await supabase
+      .from('ordenes')
+      .update({ estado_pago: 'rechazado' })
+      .in('id', orden_ids);
+
+    if (errorUpdateOrdenes) throw errorUpdateOrdenes;
+
+    // Eliminar vínculos
+    const { error: errorDeleteVinculos } = await supabase
+      .from('reporte_pago_ordenes')
+      .delete()
+      .eq('reporte_pago_id', id);
+
+    if (errorDeleteVinculos) throw errorDeleteVinculos;
 
     await crearNotificacion(
       reporte.usuario_id,
