@@ -2,7 +2,9 @@ import { Router } from 'express';
 import { 
   getEstadoCuenta, 
   getResumenClientes,
-  getComparativaMensual  // ← Faltaba esta importación
+  getComparativaMensual,
+  getElegibilidadAmpliacion,
+  solicitarAmpliacion
 } from '../controllers/estadocuenta.controller.js';
 import { verifyJWT, verifyAdmin } from '../middleware/auth.js';
 
@@ -16,5 +18,9 @@ router.get('/:id/estado-cuenta', verifyJWT, getEstadoCuenta);
 
 // Ruta para comparativa mensual
 router.get('/:id/estado-cuenta/comparativa', verifyJWT, getComparativaMensual);
+
+router.get('/:id/estado-cuenta/ampliacion-elegibilidad', verifyJWT, getElegibilidadAmpliacion);
+
+router.post('/:id/estado-cuenta/ampliacion-solicitar', verifyJWT, solicitarAmpliacion);
 
 export default router;
