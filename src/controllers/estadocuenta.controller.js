@@ -176,3 +176,121 @@ export async function getResumenClientes(req, res) {
     res.status(500).json({ error: 'Error del servidor' });
   }
 }
+
+const UMBRALES_AMPLIACION = [
+  { factor: 1.5, porcentaje: 50 },
+  { factor: 1.0, porcentaje: 30 },
+  { factor: 0.5, porcentaje: 15 },
+];
+
+async function calcularPromedioMensual(usuario_id) {
+  const hace3Meses = new Date();
+  hace3Meses.setMonth(hace3Meses.getMonth() - 3);
+
+  const { data: ordenes, error } = await supabase
+    .from('ordenes')
+    .select('total_usd')
+    .eq('usuario_id', usuario_id)
+    .neq('estado', 'cancelado')
+    .gte('created_at', hace3Meses.toISOString());
+
+  if (error) throw error;
+
+  const total = ordenes.reduce((sum, o) => sum + Number(o.total_usd), 0);
+  return total / 3;
+}
+
+// GET /:id/estado-cuenta/ampliacion-elegibilidad
+export async function getElegibilidadAmpliacion(req, res) {
+  const { id } = req.params;
+  const usuario_id = Number(id);
+
+  if (!req.user.es_admin && req.user.id !== usuario_id) {
+    return res.status(403).json({ error: 'No autorizado' });
+  }
+
+  try {
+    const { data: cliente, error: errorCliente } = await supabase
+      .from('users')
+      .select('linea_credito')
+      .eq('id', usuario_id)
+      .single();
+
+    if (errorCliente || !cliente) {
+      return res.status(404).json({ error: 'Cliente no encontrado' });
+    }
+
+    const linea_actual = Number(cliente.linea_credito || 0);
+    const promedio_mensual = await calcularPromedioMensual(usuario_id);
+
+    let nivel = UMBRALES_AMPLIACION.find(u => promedio_mensual >= linea_actual * u.factor);
+
+    res.json({
+      linea_actual,
+      promedio_mensual,
+      califica: !!nivel,
+      porcentaje_disponible: nivel?.porcentaje || 0,
+      monto_adicional: nivel ? linea_actual * (nivel.porcentaje / 100) : 0,
+      nueva_linea: nivel ? linea_actual + linea_actual * (nivel.porcentaje / 100) : linea_actual,
+    });
+  } catch (err) {
+    console.error('Error al calcular elegibilidad de ampliación:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
+// POST /:id/estado-cuenta/ampliacion-solicitar
+export async function solicitarAmpliacion(req, res) {
+  const { id } = req.params;
+  const usuario_id = Number(id);
+
+  if (req.user.id !== usuario_id) {
+    return res.status(403).json({ error: 'No autorizado' });
+  }
+
+  try {
+    const { data: cliente, error: errorCliente } = await supabase
+      .from('users')
+      .select('linea_credito')
+      .eq('id', usuario_id)
+      .single();
+
+    if (errorCliente || !cliente) {
+      return res.status(404).json({ error: 'Cliente no encontrado' });
+    }
+
+    const linea_actual = Number(cliente.linea_credito || 0);
+    const promedio_mensual = await calcularPromedioMensual(usuario_id);
+    const nivel = UMBRALES_AMPLIACION.find(u => promedio_mensual >= linea_actual * u.factor);
+
+    if (!nivel) {
+      return res.status(400).json({ error: 'No calificas para una ampliación en este momento' });
+    }
+
+    const nueva_linea = linea_actual + linea_actual * (nivel.porcentaje / 100);
+
+    const { data: actualizado, error: errorUpdate } = await supabase
+      .from('users')
+      .update({ linea_credito: nueva_linea })
+      .eq('id', usuario_id)
+      .select('linea_credito')
+      .single();
+
+    if (errorUpdate) throw errorUpdate;
+
+    // Registro histórico de la ampliación — requiere la tabla ampliaciones_credito
+    // (ver SQL abajo). Si prefieres omitir el historial por ahora, borra este insert.
+    await supabase.from('ampliaciones_credito').insert({
+      usuario_id,
+      linea_anterior: linea_actual,
+      linea_nueva: nueva_linea,
+      porcentaje_aplicado: nivel.porcentaje,
+      promedio_mensual_usado: promedio_mensual,
+    });
+
+    res.json({ linea_anterior: linea_actual, linea_nueva: actualizado.linea_credito, porcentaje_aplicado: nivel.porcentaje });
+  } catch (err) {
+    console.error('Error al solicitar ampliación:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
