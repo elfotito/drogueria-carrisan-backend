@@ -31,18 +31,25 @@ function normalizarEstado(estado) {
 
 // POST /orders
 export async function createOrden(req, res) {
-  const { items, forma_pago } = req.body;
-  const usuario_id = req.user.id;
+  const { items, forma_pago, costo_envio_usd } = req.body;
+
+  // Solo un admin puede crear la orden a nombre de otro usuario.
+  const usuario_id = (req.user.es_admin && req.body.usuario_id)
+    ? req.body.usuario_id
+    : req.user.id;
 
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'Debe incluir al menos un item' });
   }
+
+  const envio = Number(costo_envio_usd) > 0 ? Number(costo_envio_usd) : 0;
 
   // forma_pago solo puede ser 'contado' o 'credito'. Si no viene, asumimos contado.
   const formaPagoSolicitada = forma_pago === 'credito' ? 'credito' : 'contado';
 
   try {
     const productoIds = items.map(item => item.producto_id);
+
     const { data: productos, error: errorProductos } = await supabase
       .from('productos')
       .select('id, precio_usd, disponible')
@@ -70,13 +77,14 @@ export async function createOrden(req, res) {
       };
     });
 
+    total_usd += envio;
+
     // -----------------------------------------------------------------
     // Validación de crédito: NUNCA confiar en lo que mande el frontend.
     // Si el cliente pidió 'credito', recalculamos su saldo disponible
     // (linea_credito - deuda_actual) server-side antes de aceptarlo.
     // -----------------------------------------------------------------
     let forma_pago_final = 'contado';
-
     if (formaPagoSolicitada === 'credito') {
       const { data: cliente, error: errorCliente } = await supabase
         .from('users')
@@ -90,18 +98,19 @@ export async function createOrden(req, res) {
         .from('facturas')
         .select('monto_facturado')
         .eq('usuario_id', usuario_id);
+
       if (errorFacturas) throw errorFacturas;
 
-      const { data: ordenesDeuda, error: errorOrdenesDeuda } = await supabase
-      .from('ordenes')
-      .select('total_usd')
-      .eq('usuario_id', usuario_id)
-      .neq('estado', 'cancelado')
-      .neq('estado_pago', 'verificado');
+      const { data: pagos, error: errorPagos } = await supabase
+        .from('pagos')
+        .select('monto')
+        .eq('usuario_id', usuario_id);
 
-    if (errorOrdenesDeuda) throw errorOrdenesDeuda;
+      if (errorPagos) throw errorPagos;
 
-    const deuda_actual = ordenesDeuda.reduce((sum, o) => sum + Number(o.total_usd), 0);
+      const total_facturado = facturas.reduce((sum, f) => sum + Number(f.monto_facturado), 0);
+      const total_pagado = pagos.reduce((sum, p) => sum + Number(p.monto), 0);
+      const deuda_actual = total_facturado - total_pagado;
       const saldo_disponible = Number(cliente.linea_credito) - deuda_actual;
 
       if (saldo_disponible >= total_usd) {
@@ -112,14 +121,13 @@ export async function createOrden(req, res) {
       // esto es solo la última línea de defensa.
     }
 
-    // Las órdenes a contado nacen esperando llegar a 'procesando' para
-    // habilitar el pago; estado_pago se setea ahí, no aquí (ver updateEstadoOrden).
     const { data: orden, error: errorOrden } = await supabase
       .from('ordenes')
       .insert({
         usuario_id,
         estado: 'pedido_creado',
         total_usd,
+        costo_envio_usd: envio,
         forma_pago: forma_pago_final
       })
       .select()
@@ -141,7 +149,6 @@ export async function createOrden(req, res) {
       throw errorItems;
     }
 
-    // Primer registro del historial de la orden
     await supabase.from('ordenes_historial').insert({
       orden_id: orden.id,
       estado: 'pedido_creado'
