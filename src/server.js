@@ -20,6 +20,7 @@ import favoritosRoutes from './routes/favoritos.routes.js';
 import { authLimiter, apiLimiter } from './middleware/Ratelimit.js';
 import uploadsRoutes from './routes/Uploads.routes.js';
 import requerimientosRoutes from './routes/requerimientos.routes.js';
+import documentosRoutes from './routes/documentos.routes.js';
 
 dotenv.config();
 
@@ -67,6 +68,7 @@ app.use('/direcciones', direccionesRoutes);
 app.use('/favoritos', favoritosRoutes);
 app.use('/uploads', uploadsRoutes);
 app.use('/requerimientos', requerimientosRoutes);
+app.use('/documentos', documentosRoutes);
 
 app.listen(PORT, () => {
   console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
