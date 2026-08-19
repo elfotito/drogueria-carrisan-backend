@@ -32,7 +32,6 @@ function normalizarEstado(estado) {
 // POST /orders
 export async function createOrden(req, res) {
   const { items, forma_pago, sub_usuario_id } = req.body;
-  const usuario_id = req.user.id;
 
   // Solo un admin puede crear la orden a nombre de otro usuario.
   const usuario_id = (req.user.es_admin && req.body.usuario_id)
