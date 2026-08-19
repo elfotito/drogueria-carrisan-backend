@@ -18,9 +18,10 @@ export async function getProductos(req, res) {
 
   try {
     let query = supabase
-      .from('productos')
-      .select('*, marcas(id, nombre)')
-      .eq('activo', true);
+  .from('productos')
+  .select('*, marcas(id, nombre)')
+  .eq('activo', true)
+  .eq('visible_catalogo', true)
 
     if (search) {
       query = query.ilike('nombre_comercial', `%${search}%`);
