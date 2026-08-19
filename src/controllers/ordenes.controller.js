@@ -31,7 +31,8 @@ function normalizarEstado(estado) {
 
 // POST /orders
 export async function createOrden(req, res) {
-  const { items, forma_pago, costo_envio_usd } = req.body;
+  const { items, forma_pago, sub_usuario_id } = req.body;
+  const usuario_id = req.user.id;
 
   // Solo un admin puede crear la orden a nombre de otro usuario.
   const usuario_id = (req.user.es_admin && req.body.usuario_id)
@@ -48,6 +49,21 @@ export async function createOrden(req, res) {
   const formaPagoSolicitada = forma_pago === 'credito' ? 'credito' : 'contado';
 
   try {
+
+    let subUsuarioValidado = null;
+    if (sub_usuario_id) {
+      const { data: subUsuario, error: errorSub } = await supabase
+        .from('sub_usuarios')
+        .select('id, usuario_id, activo')
+        .eq('id', sub_usuario_id)
+        .single();
+
+      if (errorSub || !subUsuario || subUsuario.usuario_id !== usuario_id || !subUsuario.activo) {
+        return res.status(400).json({ error: 'Sub-usuario inválido' });
+      }
+      subUsuarioValidado = subUsuario.id;
+    }
+
     const productoIds = items.map(item => item.producto_id);
 
     const { data: productos, error: errorProductos } = await supabase
@@ -127,8 +143,8 @@ export async function createOrden(req, res) {
         usuario_id,
         estado: 'pedido_creado',
         total_usd,
-        costo_envio_usd: envio,
-        forma_pago: forma_pago_final
+        forma_pago: forma_pago_final,
+        sub_usuario_id: subUsuarioValidado
       })
       .select()
       .single();
