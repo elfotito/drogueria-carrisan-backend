@@ -17,7 +17,7 @@ router.post('/images/batch', async (req, res) => {
       images.map(async ({ path, width = 800, quality = 80 }) => {
         const { data } = supabase
           .storage
-          .from('dcimages')
+          .from('crsnimages')
           .getPublicUrl(path, {
             transform: { width, quality }
           })
