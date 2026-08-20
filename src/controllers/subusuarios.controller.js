@@ -8,7 +8,7 @@ import { supabase } from '../config/supabase.js';
 // sale del backend en texto plano ni se devuelve el hash.
 // ---------------------------------------------------------
 
-const PIN_REGEX = /^\d{4,6}$/;
+const PIN_REGEX = /^\d{4}$/;
 
 function sinHash(subUsuario) {
   const { pin_hash, ...resto } = subUsuario;
@@ -41,7 +41,7 @@ export async function crearSubUsuario(req, res) {
     return res.status(400).json({ error: 'El nombre es obligatorio' });
   }
   if (!PIN_REGEX.test(pin)) {
-    return res.status(400).json({ error: 'El PIN debe tener entre 4 y 6 dígitos' });
+    return res.status(400).json({ error: 'El PIN debe tener 4 dígitos' });
   }
 
   try {
