@@ -117,6 +117,16 @@ export async function updateProducto(req, res) {
   const cambios = req.body;
 
   try {
+let precioAnterior = null;
+    if (cambios.precio_usd !== undefined) {
+      const { data: actual } = await supabase
+        .from('productos')
+        .select('precio_usd')
+        .eq('id', id)
+        .single();
+      precioAnterior = actual?.precio_usd;
+    }
+
     const { data, error } = await supabase
       .from('productos')
       .update({ ...cambios, updated_at: new Date() })
@@ -126,6 +136,16 @@ export async function updateProducto(req, res) {
 
     if (error || !data) {
       return res.status(404).json({ error: 'Producto no encontrado' });
+    }
+
+    // 🆕 si pasó de "sin precio" (0 o null) a tener un precio real,
+    // avisamos a quien se suscribió. No bloquea la respuesta al admin.
+    const teniaPrecio = precioAnterior && Number(precioAnterior) > 0;
+    const tieneAhora = data.precio_usd && Number(data.precio_usd) > 0;
+    if (!teniaPrecio && tieneAhora) {
+      notificarDisponibles(data).catch((err) =>
+        console.error('Error al notificar disponibilidad:', err)
+      );
     }
 
     res.json(data);
