@@ -22,7 +22,7 @@ import uploadsRoutes from './routes/Uploads.routes.js';
 import requerimientosRoutes from './routes/requerimientos.routes.js';
 import documentosRoutes from './routes/documentos.routes.js';
 import chatRoutes from './routes/chat.routes.js';
-import subusuariosRouted from './routes/subusuario.routes.js';
+import subusuariosRouted from './routes/subusuarios.routes.js';
 
 dotenv.config();
 
