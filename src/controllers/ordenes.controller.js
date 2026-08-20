@@ -17,18 +17,17 @@ const LABELS_ESTADO = {
   cancelado: 'Cancelado'
 };
 
-// Transiciones permitidas entre estados para validar el flujo
+// Transiciones permitidas entre estados
 const TRANSICIONES_PERMITIDAS = {
   pedido_creado: ['procesando', 'cancelado'],
   procesando: ['preparando', 'cancelado'],
   preparando: ['enviado', 'cancelado'],
   enviado: ['entregado', 'cancelado'],
-  entregado: [], // Estado terminal
-  cancelado: []  // Estado terminal
+  entregado: [],
+  cancelado: []
 };
 
-// Normaliza estados heredados (de antes de este pipeline) al nuevo set,
-// para que órdenes viejas sigan mostrando algo coherente en el timeline.
+// Normaliza estados heredados
 function normalizarEstado(estado) {
   const mapa = {
     pendiente: 'pedido_creado',
@@ -39,16 +38,14 @@ function normalizarEstado(estado) {
   return mapa[estado] || estado;
 }
 
-// Valida que una transición de estado sea permitida según el pipeline
+// Valida transición de estado
 function validarTransicion(estadoActual, nuevoEstado) {
   const transicionesPermitidas = TRANSICIONES_PERMITIDAS[estadoActual];
-  if (!transicionesPermitidas) {
-    return false;
-  }
+  if (!transicionesPermitidas) return false;
   return transicionesPermitidas.includes(nuevoEstado);
 }
 
-// Calcula el saldo disponible de crédito de un usuario
+// Calcula saldo de crédito
 async function calcularSaldoCredito(usuario_id) {
   const { data: cliente, error: errorCliente } = await supabase
     .from('users')
@@ -87,7 +84,7 @@ async function calcularSaldoCredito(usuario_id) {
   };
 }
 
-// Verifica si un usuario tiene órdenes vencidas pendientes de pago
+// Verifica órdenes vencidas
 async function tieneOrdenesVencidas(usuario_id) {
   const { data: ordenesVencidas, error: errorVencidas } = await supabase
     .from('ordenes')
@@ -99,11 +96,10 @@ async function tieneOrdenesVencidas(usuario_id) {
     .lt('fecha_vencimiento', new Date().toISOString());
 
   if (errorVencidas) throw errorVencidas;
-  
   return ordenesVencidas && ordenesVencidas.length > 0;
 }
 
-// Valida los items de la orden
+// Valida items
 function validarItems(items) {
   if (!items || !Array.isArray(items) || items.length === 0) {
     return 'Debe incluir al menos un item';
@@ -124,56 +120,23 @@ function validarItems(items) {
   return null;
 }
 
-// Crea una orden con items de forma atómica usando transacción
-async function crearOrdenTransaccional(datosOrden, itemsConPrecio) {
-  const { data: orden, error: errorOrden } = await supabase
-    .from('ordenes')
-    .insert(datosOrden)
-    .select()
-    .single();
-
-  if (errorOrden) throw errorOrden;
-
-  const itemsParaInsertar = itemsConPrecio.map(item => ({
-    ...item,
-    orden_id: orden.id
-  }));
-
-  const { error: errorItems } = await supabase
-    .from('ordenes_items')
-    .insert(itemsParaInsertar);
-
-  if (errorItems) {
-    // Rollback: eliminar la orden si falla la inserción de items
-    await supabase.from('ordenes').delete().eq('id', orden.id);
-    throw errorItems;
-  }
-
-  return orden;
-}
-
 // POST /orders
 export async function createOrden(req, res) {
   const { items, forma_pago, sub_usuario_id, costo_envio_usd } = req.body;
 
-  // Solo un admin puede crear la orden a nombre de otro usuario.
   const usuario_id = (req.user.es_admin && req.body.usuario_id)
     ? req.body.usuario_id
     : req.user.id;
 
-  // Validar items
   const errorValidacion = validarItems(items);
   if (errorValidacion) {
     return res.status(400).json({ error: errorValidacion });
   }
 
   const envio = Number(costo_envio_usd) > 0 ? Number(costo_envio_usd) : 0;
-
-  // forma_pago solo puede ser 'contado' o 'credito'. Si no viene, asumimos contado.
   const formaPagoSolicitada = forma_pago === 'credito' ? 'credito' : 'contado';
 
   try {
-    // Validar sub-usuario si viene
     let subUsuarioValidado = null;
     if (sub_usuario_id) {
       const { data: subUsuario, error: errorSub } = await supabase
@@ -188,7 +151,6 @@ export async function createOrden(req, res) {
       subUsuarioValidado = subUsuario.id;
     }
 
-    // Obtener productos
     const productoIds = items.map(item => item.producto_id);
     const { data: productos, error: errorProductos } = await supabase
       .from('productos')
@@ -197,7 +159,6 @@ export async function createOrden(req, res) {
 
     if (errorProductos) throw errorProductos;
 
-    // Validar que todos los productos existan y estén disponibles
     for (const item of items) {
       const producto = productos.find(p => p.id === item.producto_id);
       if (!producto) {
@@ -208,7 +169,6 @@ export async function createOrden(req, res) {
       }
     }
 
-    // Calcular totales
     let total_usd = 0;
     const itemsConPrecio = items.map(item => {
       const producto = productos.find(p => p.id === item.producto_id);
@@ -223,13 +183,11 @@ export async function createOrden(req, res) {
 
     total_usd += envio;
 
-    // Validación de crédito
     let forma_pago_final = 'contado';
     let fecha_vencimiento = null;
 
     if (formaPagoSolicitada === 'credito') {
       try {
-        // Verificar si tiene órdenes vencidas
         const tieneVencidas = await tieneOrdenesVencidas(usuario_id);
         
         if (tieneVencidas) {
@@ -239,7 +197,6 @@ export async function createOrden(req, res) {
           });
         }
 
-        // Calcular saldo disponible
         const creditoInfo = await calcularSaldoCredito(usuario_id);
         
         if (creditoInfo.saldo_disponible >= total_usd) {
@@ -251,35 +208,47 @@ export async function createOrden(req, res) {
             fecha_vencimiento = vencimiento.toISOString();
           }
         }
-        // Si no alcanza el saldo, queda como contado silenciosamente
       } catch (errorCredito) {
         console.error('Error al validar crédito:', errorCredito);
-        // Si hay error en la validación de crédito, continuar como contado
         forma_pago_final = 'contado';
         fecha_vencimiento = null;
       }
     }
 
-    // Crear orden con items
-    const orden = await crearOrdenTransaccional(
-      {
+    const { data: orden, error: errorOrden } = await supabase
+      .from('ordenes')
+      .insert({
         usuario_id,
         estado: 'pedido_creado',
         total_usd,
         forma_pago: forma_pago_final,
         fecha_vencimiento,
         sub_usuario_id: subUsuarioValidado
-      },
-      itemsConPrecio
-    );
+      })
+      .select()
+      .single();
 
-    // Registrar historial
+    if (errorOrden) throw errorOrden;
+
+    const itemsParaInsertar = itemsConPrecio.map(item => ({
+      ...item,
+      orden_id: orden.id
+    }));
+
+    const { error: errorItems } = await supabase
+      .from('ordenes_items')
+      .insert(itemsParaInsertar);
+
+    if (errorItems) {
+      await supabase.from('ordenes').delete().eq('id', orden.id);
+      throw errorItems;
+    }
+
     await supabase.from('ordenes_historial').insert({
       orden_id: orden.id,
       estado: 'pedido_creado'
     });
 
-    // Crear notificación
     const mensajeCreacion = forma_pago_final === 'credito'
       ? `Tu orden #${orden.id} por $${total_usd} fue recibida. Te avisaremos si hay algún ajuste en las cantidades.`
       : `Tu orden #${orden.id} por $${total_usd} fue recibida. Te avisaremos cuando esté lista para procesar el pago.`;
@@ -296,7 +265,6 @@ export async function createOrden(req, res) {
   } catch (err) {
     console.error('Error al crear orden:', err);
     
-    // Manejo de errores específicos
     if (err.code === '23505') {
       return res.status(409).json({ error: 'Conflicto de datos' });
     }
@@ -308,42 +276,37 @@ export async function createOrden(req, res) {
   }
 }
 
-// GET /orders
+// GET /orders - CORREGIDO: Devuelve array directo para compatibilidad
 export async function getOrdenes(req, res) {
   try {
-    const { page = 1, limit = 20 } = req.query;
-    const from = (page - 1) * limit;
-    const to = from + limit - 1;
-
     let query = supabase
       .from('ordenes')
-      .select('*, users(id, nombre, email), ordenes_items(*, productos(nombre_comercial))', { count: 'exact' })
-      .order('created_at', { ascending: false })
-      .range(from, to);
+      .select('*, users(id, nombre, email), ordenes_items(*, productos(nombre_comercial))')
+      .order('created_at', { ascending: false });
 
     if (!req.user.es_admin) {
       query = query.eq('usuario_id', req.user.id);
     }
 
-    const { data, error, count } = await query;
+    const { data, error } = await query;
     if (error) throw error;
 
-    res.json({
-      data,
-      pagination: {
-        page: Number(page),
-        limit: Number(limit),
-        total: count,
-        totalPages: Math.ceil(count / limit)
-      }
-    });
+    // IMPORTANTE: Devolver array directamente
+    // Asegurar que ordenes_items siempre sea un array
+    const dataNormalizada = (data || []).map(orden => ({
+      ...orden,
+      ordenes_items: Array.isArray(orden.ordenes_items) ? orden.ordenes_items : []
+    }));
+
+    // Devolver array directo (formato que espera el frontend)
+    res.json(dataNormalizada);
   } catch (err) {
     console.error('Error al obtener órdenes:', err);
     res.status(500).json({ error: 'Error del servidor' });
   }
 }
 
-// GET /orders/:id — incluye el historial de estados para el timeline
+// GET /orders/:id - CORREGIDO: Incluye historial y asegura arrays
 export async function getOrdenById(req, res) {
   const { id } = req.params;
 
@@ -370,25 +333,31 @@ export async function getOrdenById(req, res) {
 
     if (errorHistorial) throw errorHistorial;
 
-    // Fallback para órdenes creadas antes de que existiera la tabla de historial
     const historialFinal = (historial && historial.length > 0)
       ? historial
       : [{ estado: normalizarEstado(data.estado), fecha: data.created_at }];
 
-    res.json({ ...data, historial: historialFinal });
+    // Asegurar que ordenes_items sea array
+    const ordenNormalizada = {
+      ...data,
+      ordenes_items: Array.isArray(data.ordenes_items) ? data.ordenes_items : [],
+      historial: historialFinal
+    };
+
+    res.json(ordenNormalizada);
   } catch (err) {
     console.error('Error al obtener orden:', err);
     res.status(500).json({ error: 'Error del servidor' });
   }
 }
 
-// Mensajes de notificación por transición de estado
+// Mensajes de notificación
 function mensajeParaTransicion(estado, forma_pago, ordenId) {
   if (estado === 'procesando') {
     if (forma_pago === 'contado') {
       return `¡Tu orden #${ordenId} está lista! Ya puedes proceder con el pago.`;
     }
-    return null; // A crédito no se notifica el paso a 'procesando'
+    return null;
   }
   if (estado === 'enviado') {
     return `Tu orden #${ordenId} salió de nuestro almacén rumbo a destino.`;
@@ -402,7 +371,7 @@ function mensajeParaTransicion(estado, forma_pago, ordenId) {
   return `Tu orden #${ordenId} cambió a: ${LABELS_ESTADO[estado] || estado}`;
 }
 
-// Aplica un cambio de estado a una orden
+// Aplica cambio de estado
 async function aplicarCambioEstado(orden, estado) {
   const { data, error } = await supabase
     .from('ordenes')
@@ -434,7 +403,7 @@ async function aplicarCambioEstado(orden, estado) {
   return data;
 }
 
-// GET /orders/pendientes-pago
+// GET /orders/pendientes-pago - CORREGIDO: Devuelve array directo
 export async function getOrdenesPendientesPago(req, res) {
   const usuario_id = req.user.id;
 
@@ -450,21 +419,21 @@ export async function getOrdenesPendientesPago(req, res) {
 
     if (error) throw error;
 
-    // Calcular total pendiente
-    const totalPendiente = data.reduce((sum, orden) => sum + Number(orden.total_usd), 0);
+    // Normalizar para asegurar arrays
+    const dataNormalizada = (data || []).map(orden => ({
+      ...orden,
+      ordenes_items: Array.isArray(orden.ordenes_items) ? orden.ordenes_items : []
+    }));
 
-    res.json({
-      ordenes: data,
-      total_ordenes: data.length,
-      total_pendiente: totalPendiente
-    });
+    // Devolver array directo
+    res.json(dataNormalizada);
   } catch (err) {
     console.error('Error al obtener órdenes pendientes de pago:', err);
     res.status(500).json({ error: 'Error del servidor' });
   }
 }
 
-// GET /orders/vencidas — obtiene órdenes a crédito vencidas
+// GET /orders/vencidas - Devuelve array directo
 export async function getOrdenesVencidas(req, res) {
   const usuario_id = req.user.id;
 
@@ -482,11 +451,13 @@ export async function getOrdenesVencidas(req, res) {
 
     if (error) throw error;
 
-    res.json({
-      ordenes: data,
-      total_vencidas: data.length,
-      total_adeudado: data.reduce((sum, orden) => sum + Number(orden.total_usd), 0)
-    });
+    // Normalizar para asegurar arrays
+    const dataNormalizada = (data || []).map(orden => ({
+      ...orden,
+      ordenes_items: Array.isArray(orden.ordenes_items) ? orden.ordenes_items : []
+    }));
+
+    res.json(dataNormalizada);
   } catch (err) {
     console.error('Error al obtener órdenes vencidas:', err);
     res.status(500).json({ error: 'Error del servidor' });
@@ -498,13 +469,11 @@ export async function updateEstadoOrden(req, res) {
   const { id } = req.params;
   const { estado } = req.body;
 
-  // Validar que el estado sea válido
   if (!ESTADOS_VALIDOS.includes(estado)) {
     return res.status(400).json({ error: 'Estado inválido' });
   }
 
   try {
-    // Obtener orden actual
     const { data: ordenActual, error: errorActual } = await supabase
       .from('ordenes')
       .select('*')
@@ -515,12 +484,10 @@ export async function updateEstadoOrden(req, res) {
       return res.status(404).json({ error: 'Orden no encontrada' });
     }
 
-    // Verificar permisos (solo admin puede cambiar estados)
     if (!req.user.es_admin) {
       return res.status(403).json({ error: 'No autorizado para cambiar estados' });
     }
 
-    // Validar transición
     if (!validarTransicion(ordenActual.estado, estado)) {
       return res.status(400).json({
         error: `Transición inválida de ${ordenActual.estado} a ${estado}`,
@@ -528,16 +495,12 @@ export async function updateEstadoOrden(req, res) {
       });
     }
 
-    // Aplicar cambio de estado
     let data = await aplicarCambioEstado(ordenActual, estado);
 
-    // Bifurcación crédito/contado al entrar a 'procesando'
     if (estado === 'procesando') {
       if (data.forma_pago === 'credito') {
-        // A crédito: avanza directo a preparando
         data = await aplicarCambioEstado(data, 'preparando');
       } else {
-        // A contado: abre ventana de pago
         const { data: actualizada, error: errorPago } = await supabase
           .from('ordenes')
           .update({ estado_pago: 'esperando' })
@@ -550,7 +513,6 @@ export async function updateEstadoOrden(req, res) {
       }
     }
 
-    // Si se cancela, actualizar estado_pago
     if (estado === 'cancelado') {
       const { data: cancelada, error: errorCancelacion } = await supabase
         .from('ordenes')
@@ -563,7 +525,11 @@ export async function updateEstadoOrden(req, res) {
       data = cancelada;
     }
 
-    res.json(data);
+    // Asegurar que la respuesta tenga la estructura correcta
+    res.json({
+      ...data,
+      ordenes_items: Array.isArray(data.ordenes_items) ? data.ordenes_items : []
+    });
   } catch (err) {
     console.error('Error al actualizar estado:', err);
     
@@ -575,51 +541,7 @@ export async function updateEstadoOrden(req, res) {
   }
 }
 
-// GET /orders/stats — estadísticas para dashboard
-export async function getOrdenesStats(req, res) {
-  try {
-    const usuario_id = req.user.id;
-    
-    const { data: stats, error } = await supabase
-      .from('ordenes')
-      .select(`
-        estado,
-        forma_pago,
-        estado_pago,
-        total_usd,
-        created_at
-      `)
-      .eq('usuario_id', usuario_id);
-
-    if (error) throw error;
-
-    const resumen = {
-      total_ordenes: stats.length,
-      total_gastado: stats.reduce((sum, o) => sum + Number(o.total_usd), 0),
-      por_estado: {},
-      por_forma_pago: {},
-      ultimas_30_dias: stats.filter(o => {
-        const fecha = new Date(o.created_at);
-        const hace30Dias = new Date();
-        hace30Dias.setDate(hace30Dias.getDate() - 30);
-        return fecha >= hace30Dias;
-      }).length
-    };
-
-    // Agrupar por estado
-    stats.forEach(orden => {
-      resumen.por_estado[orden.estado] = (resumen.por_estado[orden.estado] || 0) + 1;
-      resumen.por_forma_pago[orden.forma_pago] = (resumen.por_forma_pago[orden.forma_pago] || 0) + 1;
-    });
-
-    res.json(resumen);
-  } catch (err) {
-    console.error('Error al obtener estadísticas:', err);
-    res.status(500).json({ error: 'Error del servidor' });
-  }
-}
-
-// DELETE /orders/:id — cancelar orden (solo admin)
+// DELETE /orders/:id - Cancelar orden
 export async function cancelarOrden(req, res) {
   const { id } = req.params;
   const { motivo } = req.body;
@@ -643,10 +565,8 @@ export async function cancelarOrden(req, res) {
       return res.status(400).json({ error: 'La orden ya está cancelada' });
     }
 
-    // Aplicar cancelación
     const data = await aplicarCambioEstado(ordenActual, 'cancelado');
 
-    // Actualizar estado_pago
     const { data: cancelada, error: errorCancelacion } = await supabase
       .from('ordenes')
       .update({ 
@@ -659,7 +579,6 @@ export async function cancelarOrden(req, res) {
 
     if (errorCancelacion) throw errorCancelacion;
 
-    // Notificar cancelación
     await crearNotificacion(
       data.usuario_id,
       'orden_cancelada',
