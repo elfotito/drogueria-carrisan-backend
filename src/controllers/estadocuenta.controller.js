@@ -23,16 +23,28 @@ export async function getEstadoCuenta(req, res) {
     // Órdenes activas que aún pesan en la deuda: no canceladas y no verificadas.
     // Esto cubre tanto contado (esperando/reportado/rechazado) como crédito
     // (estado_pago null hasta que algún día se facture).
-    const { data: ordenesDeuda, error: errorOrdenes } = await supabase
+    const { data: ordenesDeudaRaw, error: errorOrdenes } = await supabase
       .from('ordenes')
-      .select('id, total_usd, forma_pago, estado, estado_pago, created_at')
+      .select('id, total_usd, forma_pago, estado, estado_pago, created_at, fecha_vencimiento')
       .eq('usuario_id', usuario_id)
       .neq('estado', 'cancelado')
       .neq('estado_pago', 'verificado');
 
     if (errorOrdenes) throw errorOrdenes;
 
+    const ahora = new Date();
+    // Una orden está vencida si tiene fecha_vencimiento (solo aplica a
+    // crédito con dias_credito ya fijado) y esa fecha ya pasó. En
+    // contado fecha_vencimiento es siempre null, así que nunca vencen
+    // por este criterio.
+    const ordenesDeuda = ordenesDeudaRaw.map((o) => ({
+      ...o,
+      vencida: !!o.fecha_vencimiento && new Date(o.fecha_vencimiento) < ahora,
+    }));
+
     const deuda_actual = ordenesDeuda.reduce((sum, o) => sum + Number(o.total_usd), 0);
+    const ordenesVencidas = ordenesDeuda.filter((o) => o.vencida);
+    const deuda_vencida = ordenesVencidas.reduce((sum, o) => sum + Number(o.total_usd), 0);
 
     const { data: facturas, error: errorFacturas } = await supabase
       .from('facturas')
@@ -50,12 +62,24 @@ export async function getEstadoCuenta(req, res) {
 
     if (errorPagos) throw errorPagos;
 
+    // Próxima orden por vencer: entre las que aún no vencieron y sí
+    // tienen fecha_vencimiento, la más cercana a hoy. Sirve para el
+    // placeholder "Órdenes por vencer" del dashboard.
+    const proximaAVencer = ordenesDeuda
+      .filter((o) => o.fecha_vencimiento && !o.vencida)
+      .sort((a, b) => new Date(a.fecha_vencimiento) - new Date(b.fecha_vencimiento))[0] || null;
+
     res.json({
       cliente: { id: cliente.id, nombre: cliente.nombre, email: cliente.email },
       resumen: {
         linea_credito: Number(cliente.linea_credito || 0),
         deuda_actual,
+        deuda_vencida,
         saldo: Number(cliente.linea_credito || 0) - deuda_actual,
+        cantidad_ordenes_vencidas: ordenesVencidas.length,
+        proxima_orden_vencer: proximaAVencer
+          ? { id: proximaAVencer.id, fecha_vencimiento: proximaAVencer.fecha_vencimiento, total_usd: proximaAVencer.total_usd }
+          : null,
       },
       ordenes_pendientes: ordenesDeuda,
       facturas,
