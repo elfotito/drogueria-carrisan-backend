@@ -32,6 +32,7 @@ export async function createUser(req, res) {
     direccion_entrega, 
     telefono, 
     linea_credito,
+    dias_credito,
     delivery_gratis // 🆕
   } = req.body;
 
@@ -66,6 +67,7 @@ export async function createUser(req, res) {
         direccion_entrega: direccion_entrega || null,
         telefono: telefono || null,
         linea_credito: linea_credito || 0,
+        dias_credito: dias_credito || null,
         delivery_gratis: delivery_gratis || false // 🆕
       })
       .select('*')
@@ -96,6 +98,7 @@ export async function updateUser(req, res) {
     direccion_entrega, 
     telefono, 
     linea_credito,
+    dias_credito,
     delivery_gratis // 🆕
   } = req.body;
 
@@ -112,6 +115,7 @@ export async function updateUser(req, res) {
     if (direccion_entrega !== undefined) cambios.direccion_entrega = direccion_entrega;
     if (telefono !== undefined) cambios.telefono = telefono;
     if (linea_credito !== undefined) cambios.linea_credito = linea_credito;
+    if (dias_credito !== undefined) cambios.dias_credito = dias_credito;
     if (delivery_gratis !== undefined) cambios.delivery_gratis = delivery_gratis; // 🆕
     if (password) cambios.password_hash = await bcrypt.hash(password, 10);
 
