@@ -237,8 +237,7 @@ export async function crearMensaje(req, res) {
   }
 }
 
-// GET /chat/no-leidos — total de mensajes sin leer del usuario, para
-// el badge del navbar (se suma al de notificaciones en el frontend).
+// GET /chat/no-leidos — total de mensajes sin leer del usuario
 export async function getNoLeidos(req, res) {
   try {
     let query = supabase
@@ -253,8 +252,17 @@ export async function getNoLeidos(req, res) {
     if (error) throw error;
 
     const remitenteTipo = req.user.es_admin ? 'admin' : 'cliente';
+    
+    // CORREGIDO: Normalizar mensajes_chat para asegurar que sea array
     const total = data.reduce((sum, c) => {
-      const mensajes = c.mensajes_chat || [];
+      const mensajesRaw = c.mensajes_chat;
+      // Normalizar: si es null, usar array vacío; si es objeto, convertirlo a array
+      const mensajes = !mensajesRaw 
+        ? [] 
+        : Array.isArray(mensajesRaw) 
+          ? mensajesRaw 
+          : [mensajesRaw];
+      
       return sum + mensajes.filter((m) => !m.leido && m.remitente_tipo !== remitenteTipo).length;
     }, 0);
 
