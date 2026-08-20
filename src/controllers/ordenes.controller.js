@@ -399,6 +399,27 @@ async function aplicarCambioEstado(orden, estado) {
       data.id
     );
   }
+if (estado === 'entregado' && data.forma_pago === 'credito' && !data.fecha_vencimiento) {
+    const { data: cliente, error: errorCliente } = await supabase
+      .from('users')
+      .select('dias_credito')
+      .eq('id', data.usuario_id)
+      .single();
+
+    if (!errorCliente && cliente?.dias_credito) {
+      const fechaVencimiento = new Date();
+      fechaVencimiento.setDate(fechaVencimiento.getDate() + cliente.dias_credito);
+
+      const { data: actualizada, error: errorVenc } = await supabase
+        .from('ordenes')
+        .update({ fecha_vencimiento: fechaVencimiento.toISOString() })
+        .eq('id', data.id)
+        .select()
+        .single();
+
+      if (!errorVenc) data = actualizada;
+    }
+  }
 
   return data;
 }
