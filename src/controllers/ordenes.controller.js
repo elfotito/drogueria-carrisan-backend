@@ -135,6 +135,28 @@ export async function createOrden(req, res) {
       const deuda_actual = total_facturado - total_pagado;
       const saldo_disponible = Number(cliente.linea_credito) - deuda_actual;
 
+      // Bloqueo por órdenes vencidas: un cliente con al menos una orden
+      // a crédito ya vencida no puede seguir comprando a crédito hasta
+      // regularizar. Contado no se ve afectado por esto — por eso el
+      // check vive acá adentro del branch de crédito, no antes.
+      const { data: ordenesVencidas, error: errorVencidas } = await supabase
+        .from('ordenes')
+        .select('id')
+        .eq('usuario_id', usuario_id)
+        .neq('estado', 'cancelado')
+        .neq('estado_pago', 'verificado')
+        .not('fecha_vencimiento', 'is', null)
+        .lt('fecha_vencimiento', new Date().toISOString());
+
+      if (errorVencidas) throw errorVencidas;
+
+      if (ordenesVencidas && ordenesVencidas.length > 0) {
+        return res.status(403).json({
+          error: 'Tenés órdenes vencidas pendientes de pago. Regularizá tu cuenta para seguir comprando a crédito.',
+          codigo: 'CUENTA_CON_VENCIDAS',
+        });
+      }
+
       if (saldo_disponible >= total_usd) {
         forma_pago_final = 'credito';
 
