@@ -6,6 +6,7 @@ import { crearNotificacion } from './notificaciones.controller.js';
 // terminal fuera de la línea normal (una orden puede cancelarse
 // desde cualquier punto).
 // ---------------------------------------------------------
+
 const ESTADOS_VALIDOS = ['pedido_creado', 'procesando', 'preparando', 'enviado', 'entregado', 'cancelado'];
 
 const LABELS_ESTADO = {
@@ -32,23 +33,21 @@ function normalizarEstado(estado) {
 // POST /orders
 export async function createOrden(req, res) {
   const { items, forma_pago, sub_usuario_id } = req.body;
-
-  // Solo un admin puede crear la orden a nombre de otro usuario.
-  const usuario_id = (req.user.es_admin && req.body.usuario_id)
-    ? req.body.usuario_id
-    : req.user.id;
+  const usuario_id = req.user.id;
 
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'Debe incluir al menos un item' });
   }
 
-  const envio = Number(costo_envio_usd) > 0 ? Number(costo_envio_usd) : 0;
-
   // forma_pago solo puede ser 'contado' o 'credito'. Si no viene, asumimos contado.
   const formaPagoSolicitada = forma_pago === 'credito' ? 'credito' : 'contado';
 
   try {
-
+    // -----------------------------------------------------------------
+    // Sub-usuario (opcional): si viene, validar que pertenezca a esta
+    // cuenta y esté activo. NUNCA confiar en que el frontend mandó el
+    // correcto — mismo criterio que la validación de crédito de abajo.
+    // -----------------------------------------------------------------
     let subUsuarioValidado = null;
     if (sub_usuario_id) {
       const { data: subUsuario, error: errorSub } = await supabase
@@ -64,7 +63,6 @@ export async function createOrden(req, res) {
     }
 
     const productoIds = items.map(item => item.producto_id);
-
     const { data: productos, error: errorProductos } = await supabase
       .from('productos')
       .select('id, precio_usd, disponible')
@@ -91,8 +89,6 @@ export async function createOrden(req, res) {
         precio_unitario: producto.precio_usd
       };
     });
-
-    total_usd += envio;
 
     // -----------------------------------------------------------------
     // Validación de crédito: NUNCA confiar en lo que mande el frontend.
@@ -136,6 +132,8 @@ export async function createOrden(req, res) {
       // esto es solo la última línea de defensa.
     }
 
+    // Las órdenes a contado nacen esperando llegar a 'procesando' para
+    // habilitar el pago; estado_pago se setea ahí, no aquí (ver updateEstadoOrden).
     const { data: orden, error: errorOrden } = await supabase
       .from('ordenes')
       .insert({
@@ -164,6 +162,7 @@ export async function createOrden(req, res) {
       throw errorItems;
     }
 
+    // Primer registro del historial de la orden
     await supabase.from('ordenes_historial').insert({
       orden_id: orden.id,
       estado: 'pedido_creado'
@@ -193,7 +192,7 @@ export async function getOrdenes(req, res) {
   try {
     let query = supabase
       .from('ordenes')
-      .select('*, users(id, nombre, email), ordenes_items(*, productos(nombre_comercial))')
+      .select('*, users(id, nombre, email), sub_usuarios(nombre), ordenes_items(*, productos(nombre_comercial))')
       .order('created_at', { ascending: false });
 
     if (!req.user.es_admin) {
@@ -202,6 +201,7 @@ export async function getOrdenes(req, res) {
 
     const { data, error } = await query;
     if (error) throw error;
+
     res.json(data);
   } catch (err) {
     console.error('Error al obtener órdenes:', err);
@@ -216,14 +216,13 @@ export async function getOrdenById(req, res) {
   try {
     const { data, error } = await supabase
       .from('ordenes')
-      .select('*, users(id, nombre, email), ordenes_items(*, productos(nombre_comercial))')
+      .select('*, users(id, nombre, email), sub_usuarios(nombre), ordenes_items(*, productos(nombre_comercial))')
       .eq('id', id)
       .single();
 
     if (error || !data) {
       return res.status(404).json({ error: 'Orden no encontrada' });
     }
-
     if (!req.user.es_admin && data.usuario_id !== req.user.id) {
       return res.status(403).json({ error: 'No autorizado' });
     }
@@ -313,6 +312,7 @@ export async function getOrdenesPendientesPago(req, res) {
       .order('created_at', { ascending: false });
 
     if (error) throw error;
+
     res.json(data);
   } catch (err) {
     console.error('Error al obtener órdenes pendientes de pago:', err);
@@ -357,6 +357,7 @@ export async function updateEstadoOrden(req, res) {
           .eq('id', data.id)
           .select()
           .single();
+
         if (errorPago) throw errorPago;
         data = actualizada;
       }
