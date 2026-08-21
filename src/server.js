@@ -18,6 +18,7 @@ import notificacionesRoutes from './routes/notificaciones.routes.js';
 import listasRoutes from './routes/listas.routes.js';
 import direccionesRoutes from './routes/direcciones.routes.js';
 import favoritosRoutes from './routes/favoritos.routes.js';
+import cotizacionesRoutes from './routes/cotizaciones.routes.js';  // ✅ AGREGADO
 import { authLimiter, apiLimiter } from './middleware/Ratelimit.js';
 import uploadsRoutes from './routes/Uploads.routes.js';
 import requerimientosRoutes from './routes/requerimientos.routes.js';
@@ -71,6 +72,7 @@ app.use('/favoritos', favoritosRoutes);
 app.use('/uploads', uploadsRoutes);
 app.use('/requerimientos', requerimientosRoutes);
 app.use('/documentos', documentosRoutes);
+app.use('/cotizaciones', cotizacionesRoutes); 
 
 app.listen(PORT, () => {
   console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
