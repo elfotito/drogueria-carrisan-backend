@@ -23,7 +23,7 @@ import uploadsRoutes from './routes/Uploads.routes.js';
 import requerimientosRoutes from './routes/requerimientos.routes.js';
 import documentosRoutes from './routes/documentos.routes.js';
 import chatRoutes from './routes/chat.routes.js';
-import subusuariosRouted from './routes/subusuarios.routes.js';
+import subusuariosRoutes from './routes/subusuarios.routes.js';
 import cotizacionesRoutes from './routes/cotizaciones.routes.js';
 import { revisarVencimientos } from './jobs/revisarVencimientos.js';
 

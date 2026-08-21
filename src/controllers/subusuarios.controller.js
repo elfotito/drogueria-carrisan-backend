@@ -115,12 +115,7 @@ export async function actualizarSubUsuario(req, res) {
   }
 }
 
-// DELETE /sub-usuarios/:id
-// Borrado real (no soft-delete) porque órdenes.sub_usuario_id se
-// queda en null automáticamente al eliminar (FK sin ON DELETE
-// CASCADE en ese sentido — revisa que tu migración lo deje así si
-// quieres conservar el historial con el nombre; alternativa más
-// segura: usar PATCH activo=false en vez de DELETE).
+
 export async function eliminarSubUsuario(req, res) {
   const { id } = req.params;
 
