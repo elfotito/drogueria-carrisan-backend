@@ -55,11 +55,18 @@ export async function login(req, res) {
     }
 
     // 3. Generar el token JWT (incluye token_version para poder revocar
-    // esta sesión específica más adelante sin esperar a que expire)
+    // esta sesión específica más adelante sin esperar a que expire).
+    // 3 días de duración: la sesión larga está bien porque la protección
+    // real de las acciones sensibles (pagos, estado de cuenta) no depende
+    // de esto — esas rutas exigen una revalidación fresca contra el
+    // servidor en cada entrada (ver PrivateRouteSensible en el frontend
+    // y GET /auth/verify más abajo), y además el checkout pide un PIN de
+    // compra aparte. El JWT largo es solo "mantenerte logueado", no la
+    // única barrera para comprar o ver dinero.
     const token = jwt.sign(
       { id: user.id, email: user.email, es_admin: user.es_admin, nombre: user.nombre, token_version: user.token_version ?? 0 },
       process.env.JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: '3d' }
     );
 
     // 4. Devolver token + datos del usuario (sin el password_hash)
