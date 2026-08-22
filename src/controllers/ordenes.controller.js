@@ -562,6 +562,153 @@ export async function updateEstadoOrden(req, res) {
   }
 }
 
+// PATCH /orders/:id/items - Admin ajusta cantidades o elimina productos
+// de una orden ya creada (ej: falta de disponibilidad). Recalcula el
+// total y notifica al cliente el detalle del ajuste.
+export async function updateItemsOrden(req, res) {
+  const { id } = req.params;
+  const { items } = req.body; // [{ id: ordenes_items.id, cantidad }] — cantidad 0 = eliminar
+
+  if (!req.user.es_admin) {
+    return res.status(403).json({ error: 'No autorizado para modificar items de la orden' });
+  }
+
+  if (!items || !Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: 'Debe incluir al menos un item' });
+  }
+
+  for (const item of items) {
+    if (!item.id) {
+      return res.status(400).json({ error: 'Cada item debe incluir su id' });
+    }
+    if (item.cantidad === undefined || item.cantidad === null || item.cantidad < 0 || !Number.isInteger(item.cantidad)) {
+      return res.status(400).json({ error: `Cantidad inválida para el item ${item.id}` });
+    }
+  }
+
+  try {
+    const { data: ordenActual, error: errorActual } = await supabase
+      .from('ordenes')
+      .select('*, ordenes_items(*, productos(nombre_comercial))')
+      .eq('id', id)
+      .single();
+
+    if (errorActual || !ordenActual) {
+      return res.status(404).json({ error: 'Orden no encontrada' });
+    }
+
+    if (['entregado', 'cancelado'].includes(ordenActual.estado)) {
+      return res.status(400).json({ error: `No se puede modificar una orden en estado ${LABELS_ESTADO[ordenActual.estado] || ordenActual.estado}` });
+    }
+
+    const itemsActuales = ordenActual.ordenes_items || [];
+    const itemsPorId = new Map(itemsActuales.map(i => [i.id, i]));
+
+    // Validar que todos los items pertenezcan a esta orden
+    for (const item of items) {
+      const itemActual = itemsPorId.get(item.id);
+      if (!itemActual) {
+        return res.status(400).json({ error: `El item ${item.id} no pertenece a esta orden` });
+      }
+      if (itemActual.cantidad === item.cantidad) continue;
+      // Si se aumenta la cantidad, validar disponibilidad del producto
+      if (item.cantidad > itemActual.cantidad) {
+        const { data: producto, error: errorProducto } = await supabase
+          .from('productos')
+          .select('disponible')
+          .eq('id', itemActual.producto_id)
+          .single();
+        if (errorProducto || !producto || !producto.disponible) {
+          return res.status(400).json({ error: `El producto de item ${item.id} no está disponible para aumentar cantidad` });
+        }
+      }
+    }
+
+    // Detectar cambios reales para armar el mensaje de notificación
+    const cambios = [];
+    const idsAEliminar = [];
+    const actualizacionesPorId = new Map();
+
+    for (const item of items) {
+      const itemActual = itemsPorId.get(item.id);
+      const nombreProducto = itemActual.productos?.nombre_comercial || 'Producto';
+
+      if (item.cantidad === itemActual.cantidad) continue;
+
+      if (item.cantidad === 0) {
+        idsAEliminar.push(item.id);
+        cambios.push(`${nombreProducto}: eliminado (no disponible)`);
+      } else {
+        actualizacionesPorId.set(item.id, item.cantidad);
+        cambios.push(`${nombreProducto}: ${itemActual.cantidad} → ${item.cantidad} unidades`);
+      }
+    }
+
+    if (cambios.length === 0) {
+      return res.status(400).json({ error: 'No hay cambios que aplicar' });
+    }
+
+    if (idsAEliminar.length === itemsActuales.length) {
+      return res.status(400).json({ error: 'La orden debe conservar al menos un producto. Si necesitás vaciarla, cancelala en su lugar.' });
+    }
+
+    if (idsAEliminar.length > 0) {
+      const { error: errorDelete } = await supabase
+        .from('ordenes_items')
+        .delete()
+        .in('id', idsAEliminar);
+      if (errorDelete) throw errorDelete;
+    }
+
+    for (const [itemId, cantidad] of actualizacionesPorId) {
+      const { error: errorUpdate } = await supabase
+        .from('ordenes_items')
+        .update({ cantidad })
+        .eq('id', itemId);
+      if (errorUpdate) throw errorUpdate;
+    }
+
+    // Recalcular total: items restantes con su precio congelado + envío original
+    const { data: itemsRestantes, error: errorRestantes } = await supabase
+      .from('ordenes_items')
+      .select('cantidad, precio_unitario')
+      .eq('orden_id', id);
+
+    if (errorRestantes) throw errorRestantes;
+
+    const costoEnvio = Number(ordenActual.costo_delivery || 0);
+    const nuevoTotal = itemsRestantes.reduce(
+      (sum, item) => sum + Number(item.precio_unitario) * item.cantidad,
+      0
+    ) + costoEnvio;
+
+    const { data: ordenActualizada, error: errorTotal } = await supabase
+      .from('ordenes')
+      .update({ total_usd: nuevoTotal })
+      .eq('id', id)
+      .select('*, ordenes_items(*, productos(nombre_comercial))')
+      .single();
+
+    if (errorTotal) throw errorTotal;
+
+    await crearNotificacion(
+      ordenActual.usuario_id,
+      'orden_ajustada',
+      'Tu pedido fue ajustado',
+      `Tu orden #${id} fue ajustada según disponibilidad de stock: ${cambios.join('; ')}. Nuevo total: $${nuevoTotal.toFixed(2)}.`,
+      Number(id)
+    );
+
+    res.json({
+      ...ordenActualizada,
+      ordenes_items: Array.isArray(ordenActualizada.ordenes_items) ? ordenActualizada.ordenes_items : []
+    });
+  } catch (err) {
+    console.error('Error al ajustar items de la orden:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
 // DELETE /orders/:id - Cancelar orden
 export async function cancelarOrden(req, res) {
   const { id } = req.params;

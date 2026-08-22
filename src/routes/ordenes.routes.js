@@ -4,7 +4,8 @@ import {
   getOrdenes,
   getOrdenById,
   getOrdenesPendientesPago,
-  updateEstadoOrden
+  updateEstadoOrden,
+  updateItemsOrden
 } from '../controllers/ordenes.controller.js';
 import { verifyJWT, verifyAdmin } from '../middleware/auth.js';
 
@@ -16,5 +17,6 @@ router.get('/', verifyJWT, getOrdenes);
 router.get('/pendientes-pago', verifyJWT, getOrdenesPendientesPago);
 router.get('/:id', verifyJWT, getOrdenById);
 router.patch('/:id/estado', verifyJWT, verifyAdmin, updateEstadoOrden);
+router.patch('/:id/items', verifyJWT, verifyAdmin, updateItemsOrden);
 
 export default router;
