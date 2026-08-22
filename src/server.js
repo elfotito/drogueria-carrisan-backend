@@ -26,6 +26,7 @@ import chatRoutes from './routes/chat.routes.js';
 import subusuariosRoutes from './routes/subusuarios.routes.js';
 import cotizacionesRoutes from './routes/cotizaciones.routes.js';
 import { revisarVencimientos } from './jobs/revisarVencimientos.js';
+import presupuestosRoutes from './routes/presupuestos.routes.js';
 
 dotenv.config();
 
@@ -77,6 +78,8 @@ app.use('/documentos', documentosRoutes);
 app.use('/chat', chatRoutes);
 app.use('/subusuarios', subusuariosRoutes);
 app.use('/cotizaciones', cotizacionesRoutes);
+app.use('/presupuestos', presupuestosRoutes);
+
 
 app.listen(PORT, () => {
   console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
