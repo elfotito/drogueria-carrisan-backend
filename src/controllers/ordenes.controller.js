@@ -611,6 +611,146 @@ export async function updateEstadoOrden(req, res) {
   }
 }
 
+// Estados en los que un admin puede editar los items de una orden.
+// Una vez en 'preparando' la mercancía ya se está armando físicamente,
+// así que editar cantidades desde ahí en adelante queda bloqueado.
+const ESTADOS_EDITABLES_ITEMS = ['pedido_creado', 'procesando'];
+
+// PATCH /:id/items — solo admin. Reemplaza por completo la lista de
+// items de una orden existente (no hace merge parcial: el body debe
+// traer la lista final completa, igual que createOrden). Recalcula
+// total_usd server-side a partir de los precios actuales de catálogo,
+// nunca confía en precios que pudiera mandar el cliente.
+export async function updateItemsOrden(req, res) {
+  const { id } = req.params;
+  const { items } = req.body;
+
+  if (!req.user.es_admin) {
+    return res.status(403).json({ error: 'No autorizado para editar items de una orden' });
+  }
+
+  const errorValidacion = validarItems(items);
+  if (errorValidacion) {
+    return res.status(400).json({ error: errorValidacion });
+  }
+
+  try {
+    const { data: ordenActual, error: errorActual } = await supabase
+      .from('ordenes')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (errorActual || !ordenActual) {
+      return res.status(404).json({ error: 'Orden no encontrada' });
+    }
+
+    if (!ESTADOS_EDITABLES_ITEMS.includes(ordenActual.estado)) {
+      return res.status(400).json({
+        error: `No se pueden editar los items de una orden en estado "${LABELS_ESTADO[ordenActual.estado] || ordenActual.estado}"`,
+        estados_editables: ESTADOS_EDITABLES_ITEMS
+      });
+    }
+
+    // Igual que en createOrden: se valida que cada producto exista y
+    // esté disponible, y el precio se toma siempre del catálogo actual
+    // (nunca de lo que mande el cliente en el body).
+    const productoIds = items.map((item) => item.producto_id);
+    const { data: productos, error: errorProductos } = await supabase
+      .from('productos')
+      .select('id, precio_usd, disponible')
+      .in('id', productoIds);
+
+    if (errorProductos) throw errorProductos;
+
+    for (const item of items) {
+      const producto = productos.find((p) => p.id === item.producto_id);
+      if (!producto) {
+        return res.status(400).json({ error: `Producto ${item.producto_id} no existe` });
+      }
+      if (!producto.disponible) {
+        return res.status(400).json({ error: `Producto ${item.producto_id} no disponible` });
+      }
+    }
+
+    let total_usd = 0;
+    const itemsConPrecio = items.map((item) => {
+      const producto = productos.find((p) => p.id === item.producto_id);
+      total_usd += producto.precio_usd * item.cantidad;
+      return {
+        orden_id: ordenActual.id,
+        producto_id: item.producto_id,
+        cantidad: item.cantidad,
+        precio_unitario: producto.precio_usd
+      };
+    });
+
+    total_usd += Number(ordenActual.costo_envio_usd || 0);
+
+    // Reemplazo completo: se borran los items anteriores y se insertan
+    // los nuevos, dentro del mismo flujo (si el insert falla, se
+    // reintentan los originales para no dejar la orden sin items).
+    const { data: itemsAnteriores, error: errorItemsAnteriores } = await supabase
+      .from('ordenes_items')
+      .select('*')
+      .eq('orden_id', ordenActual.id);
+
+    if (errorItemsAnteriores) throw errorItemsAnteriores;
+
+    const { error: errorBorrar } = await supabase
+      .from('ordenes_items')
+      .delete()
+      .eq('orden_id', ordenActual.id);
+
+    if (errorBorrar) throw errorBorrar;
+
+    const { error: errorInsertar } = await supabase
+      .from('ordenes_items')
+      .insert(itemsConPrecio);
+
+    if (errorInsertar) {
+      // Rollback manual: restauramos los items previos para no dejar
+      // la orden sin ningún item si la inserción de los nuevos falló.
+      if (itemsAnteriores?.length) {
+        await supabase.from('ordenes_items').insert(
+          itemsAnteriores.map(({ id: _itemId, ...resto }) => resto)
+        );
+      }
+      throw errorInsertar;
+    }
+
+    const { data: ordenActualizada, error: errorUpdateTotal } = await supabase
+      .from('ordenes')
+      .update({ total_usd })
+      .eq('id', ordenActual.id)
+      .select()
+      .single();
+
+    if (errorUpdateTotal) throw errorUpdateTotal;
+
+    await crearNotificacion(
+      ordenActual.usuario_id,
+      'orden_actualizada',
+      'Tu orden fue actualizada',
+      `Los productos de tu orden #${ordenActual.id} fueron ajustados. Nuevo total: $${total_usd}.`,
+      ordenActual.id
+    );
+
+    res.json({ ...ordenActualizada, items: itemsConPrecio });
+  } catch (err) {
+    console.error('Error al actualizar items de orden:', err);
+
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'Conflicto de datos' });
+    }
+    if (err.code === '23503') {
+      return res.status(400).json({ error: 'Referencia inválida' });
+    }
+
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
 // DELETE /orders/:id - Cancelar orden
 export async function cancelarOrden(req, res) {
   const { id } = req.params;
