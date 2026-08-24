@@ -74,3 +74,67 @@ export async function subirComprobante(req, res) {
     res.status(500).json({ error: 'No se pudo subir el comprobante. Intenta de nuevo.' });
   }
 }
+
+// Carpeta separada para documentos de registro (RIF, permiso sanitario,
+// registro mercantil, certificado profesional). Si no se define, caen
+// en la raíz del mismo Drive que los comprobantes de pago.
+const FOLDER_ID_REGISTRO = process.env.GOOGLE_DRIVE_FOLDER_ID_REGISTRO || FOLDER_ID;
+
+const TIPOS_PERMITIDOS_REGISTRO = ['application/pdf'];
+
+// POST /uploads/registro (público, multipart/form-data, campo "archivo")
+// Sin verifyJWT: durante el registro el usuario todavía no tiene cuenta
+// ni token. Protegido por rate limiting general de /uploads + validación
+// estricta de tipo/tamaño. Los archivos quedan "sueltos" en Drive hasta
+// que el registro se completa y sus URLs se asocian al user_id recién
+// creado (ver auth.controller.js → register). Si alguien sube un archivo
+// y abandona el formulario, queda huérfano en Drive — aceptable, se
+// puede limpiar manualmente si se acumulan.
+export async function subirArchivoRegistro(req, res) {
+  const archivo = req.file;
+  const { tipo_documento } = req.body; // rif | permiso_sanitario | registro_mercantil | certificado_acreditacion (solo para nombrar el archivo)
+
+  if (!archivo) {
+    return res.status(400).json({ error: 'No se recibió ningún archivo' });
+  }
+  if (!TIPOS_PERMITIDOS_REGISTRO.includes(archivo.mimetype)) {
+    return res.status(400).json({ error: 'Formato no permitido. Solo se aceptan PDF.' });
+  }
+  if (archivo.size > TAMANO_MAXIMO_BYTES) {
+    return res.status(400).json({ error: 'El archivo supera el tamaño máximo de 10MB' });
+  }
+
+  try {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const etiquetaDocumento = tipo_documento || 'documento';
+    const nombreArchivo = `registro_${etiquetaDocumento}_${timestamp}.pdf`;
+
+    const { data } = await drive.files.create({
+      requestBody: {
+        name: nombreArchivo,
+        parents: FOLDER_ID_REGISTRO ? [FOLDER_ID_REGISTRO] : undefined,
+      },
+      media: {
+        mimeType: archivo.mimetype,
+        body: Readable.from(archivo.buffer),
+      },
+      fields: 'id, webViewLink',
+    });
+
+    // Privado por defecto en Drive; le damos acceso de lector a
+    // cualquiera con el link para que el admin lo abra directo desde
+    // el panel de verificación de cuentas.
+    await drive.permissions.create({
+      fileId: data.id,
+      requestBody: { role: 'reader', type: 'anyone' },
+    });
+
+    res.status(201).json({
+      url: data.webViewLink,
+      drive_file_id: data.id,
+    });
+  } catch (err) {
+    console.error('Error al subir archivo de registro a Drive:', err);
+    res.status(500).json({ error: 'No se pudo subir el archivo. Intenta de nuevo.' });
+  }
+}
