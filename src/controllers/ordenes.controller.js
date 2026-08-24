@@ -122,7 +122,10 @@ function validarItems(items) {
 
 // POST /orders
 export async function createOrden(req, res) {
-  const { items, forma_pago, sub_usuario_id, costo_envio_usd } = req.body;
+  const {
+    items, forma_pago, sub_usuario_id,
+    tipo_envio, direccion_envio_id, agencia_envio,
+  } = req.body;
 
   const usuario_id = (req.user.es_admin && req.body.usuario_id)
     ? req.body.usuario_id
@@ -133,10 +136,52 @@ export async function createOrden(req, res) {
     return res.status(400).json({ error: errorValidacion });
   }
 
-  const envio = Number(costo_envio_usd) > 0 ? Number(costo_envio_usd) : 0;
+  const TIPOS_ENVIO_VALIDOS = ['retiro', 'delivery', 'envio_nacional'];
+  const tipoEnvioValido = TIPOS_ENVIO_VALIDOS.includes(tipo_envio) ? tipo_envio : 'retiro';
   const formaPagoSolicitada = forma_pago === 'credito' ? 'credito' : 'contado';
 
   try {
+    // --- Validar dirección/agencia según el tipo de envío elegido ---
+    let direccionValidada = null;
+    if (tipoEnvioValido === 'delivery' || tipoEnvioValido === 'envio_nacional') {
+      if (!direccion_envio_id) {
+        return res.status(400).json({ error: 'Debes seleccionar una dirección de envío' });
+      }
+
+      const { data: direccion, error: errorDireccion } = await supabase
+        .from('direcciones_envio')
+        .select('id, usuario_id, activo')
+        .eq('id', direccion_envio_id)
+        .single();
+
+      if (errorDireccion || !direccion || direccion.usuario_id !== usuario_id || !direccion.activo) {
+        return res.status(400).json({ error: 'Dirección de envío inválida' });
+      }
+      direccionValidada = direccion.id;
+    }
+
+    if (tipoEnvioValido === 'envio_nacional' && !agencia_envio) {
+      return res.status(400).json({ error: 'Debes indicar la agencia de envío' });
+    }
+
+    // --- Costo de envío: SIEMPRE se calcula en el servidor. Nunca se
+    // confía en un costo enviado por el cliente (evita que alguien
+    // manipule la petición para llevarse el delivery gratis). ---
+    let envio = 0;
+    if (tipoEnvioValido === 'delivery') {
+      const { data: clienteDelivery, error: errorClienteDelivery } = await supabase
+        .from('users')
+        .select('delivery_gratis')
+        .eq('id', usuario_id)
+        .single();
+
+      if (errorClienteDelivery || !clienteDelivery) {
+        return res.status(400).json({ error: 'Usuario no encontrado' });
+      }
+      envio = clienteDelivery.delivery_gratis ? 0 : 8.00;
+    }
+    // 'envio_nacional' se paga en destino (0 acá) y 'retiro' no tiene costo.
+
     let subUsuarioValidado = null;
     if (sub_usuario_id) {
       const { data: subUsuario, error: errorSub } = await supabase
@@ -223,7 +268,11 @@ export async function createOrden(req, res) {
         total_usd,
         forma_pago: forma_pago_final,
         fecha_vencimiento,
-        sub_usuario_id: subUsuarioValidado
+        sub_usuario_id: subUsuarioValidado,
+        tipo_envio: tipoEnvioValido,
+        direccion_envio_id: direccionValidada,
+        costo_envio_usd: envio,
+        agencia_envio: tipoEnvioValido === 'envio_nacional' ? agencia_envio : null,
       })
       .select()
       .single();
@@ -558,153 +607,6 @@ export async function updateEstadoOrden(req, res) {
       return res.status(409).json({ error: 'Conflicto de datos' });
     }
     
-    res.status(500).json({ error: 'Error del servidor' });
-  }
-}
-
-// PATCH /orders/:id/items - Admin ajusta cantidades o elimina productos
-// de una orden ya creada (ej: falta de disponibilidad). Recalcula el
-// total y notifica al cliente el detalle del ajuste.
-export async function updateItemsOrden(req, res) {
-  const { id } = req.params;
-  const { items } = req.body; // [{ id: ordenes_items.id, cantidad }] — cantidad 0 = eliminar
-
-  if (!req.user.es_admin) {
-    return res.status(403).json({ error: 'No autorizado para modificar items de la orden' });
-  }
-
-  if (!items || !Array.isArray(items) || items.length === 0) {
-    return res.status(400).json({ error: 'Debe incluir al menos un item' });
-  }
-
-  for (const item of items) {
-    if (!item.id) {
-      return res.status(400).json({ error: 'Cada item debe incluir su id' });
-    }
-    if (item.cantidad === undefined || item.cantidad === null || item.cantidad < 0 || !Number.isInteger(item.cantidad)) {
-      return res.status(400).json({ error: `Cantidad inválida para el item ${item.id}` });
-    }
-  }
-
-  try {
-    const { data: ordenActual, error: errorActual } = await supabase
-      .from('ordenes')
-      .select('*, ordenes_items(*, productos(nombre_comercial))')
-      .eq('id', id)
-      .single();
-
-    if (errorActual || !ordenActual) {
-      return res.status(404).json({ error: 'Orden no encontrada' });
-    }
-
-    if (['entregado', 'cancelado'].includes(ordenActual.estado)) {
-      return res.status(400).json({ error: `No se puede modificar una orden en estado ${LABELS_ESTADO[ordenActual.estado] || ordenActual.estado}` });
-    }
-
-    const itemsActuales = ordenActual.ordenes_items || [];
-    const itemsPorId = new Map(itemsActuales.map(i => [i.id, i]));
-
-    // Validar que todos los items pertenezcan a esta orden
-    for (const item of items) {
-      const itemActual = itemsPorId.get(item.id);
-      if (!itemActual) {
-        return res.status(400).json({ error: `El item ${item.id} no pertenece a esta orden` });
-      }
-      if (itemActual.cantidad === item.cantidad) continue;
-      // Si se aumenta la cantidad, validar disponibilidad del producto
-      if (item.cantidad > itemActual.cantidad) {
-        const { data: producto, error: errorProducto } = await supabase
-          .from('productos')
-          .select('disponible')
-          .eq('id', itemActual.producto_id)
-          .single();
-        if (errorProducto || !producto || !producto.disponible) {
-          return res.status(400).json({ error: `El producto de item ${item.id} no está disponible para aumentar cantidad` });
-        }
-      }
-    }
-
-    // Detectar cambios reales para armar el mensaje de notificación
-    const cambios = [];
-    const idsAEliminar = [];
-    const actualizacionesPorId = new Map();
-
-    for (const item of items) {
-      const itemActual = itemsPorId.get(item.id);
-      const nombreProducto = itemActual.productos?.nombre_comercial || 'Producto';
-
-      if (item.cantidad === itemActual.cantidad) continue;
-
-      if (item.cantidad === 0) {
-        idsAEliminar.push(item.id);
-        cambios.push(`${nombreProducto}: eliminado (no disponible)`);
-      } else {
-        actualizacionesPorId.set(item.id, item.cantidad);
-        cambios.push(`${nombreProducto}: ${itemActual.cantidad} → ${item.cantidad} unidades`);
-      }
-    }
-
-    if (cambios.length === 0) {
-      return res.status(400).json({ error: 'No hay cambios que aplicar' });
-    }
-
-    if (idsAEliminar.length === itemsActuales.length) {
-      return res.status(400).json({ error: 'La orden debe conservar al menos un producto. Si necesitás vaciarla, cancelala en su lugar.' });
-    }
-
-    if (idsAEliminar.length > 0) {
-      const { error: errorDelete } = await supabase
-        .from('ordenes_items')
-        .delete()
-        .in('id', idsAEliminar);
-      if (errorDelete) throw errorDelete;
-    }
-
-    for (const [itemId, cantidad] of actualizacionesPorId) {
-      const { error: errorUpdate } = await supabase
-        .from('ordenes_items')
-        .update({ cantidad })
-        .eq('id', itemId);
-      if (errorUpdate) throw errorUpdate;
-    }
-
-    // Recalcular total: items restantes con su precio congelado + envío original
-    const { data: itemsRestantes, error: errorRestantes } = await supabase
-      .from('ordenes_items')
-      .select('cantidad, precio_unitario')
-      .eq('orden_id', id);
-
-    if (errorRestantes) throw errorRestantes;
-
-    const costoEnvio = Number(ordenActual.costo_delivery || 0);
-    const nuevoTotal = itemsRestantes.reduce(
-      (sum, item) => sum + Number(item.precio_unitario) * item.cantidad,
-      0
-    ) + costoEnvio;
-
-    const { data: ordenActualizada, error: errorTotal } = await supabase
-      .from('ordenes')
-      .update({ total_usd: nuevoTotal })
-      .eq('id', id)
-      .select('*, ordenes_items(*, productos(nombre_comercial))')
-      .single();
-
-    if (errorTotal) throw errorTotal;
-
-    await crearNotificacion(
-      ordenActual.usuario_id,
-      'orden_ajustada',
-      'Tu pedido fue ajustado',
-      `Tu orden #${id} fue ajustada según disponibilidad de stock: ${cambios.join('; ')}. Nuevo total: $${nuevoTotal.toFixed(2)}.`,
-      Number(id)
-    );
-
-    res.json({
-      ...ordenActualizada,
-      ordenes_items: Array.isArray(ordenActualizada.ordenes_items) ? ordenActualizada.ordenes_items : []
-    });
-  } catch (err) {
-    console.error('Error al ajustar items de la orden:', err);
     res.status(500).json({ error: 'Error del servidor' });
   }
 }
