@@ -20,12 +20,13 @@ export async function revisarVencimientos() {
   console.log('⏰ Revisando órdenes vencidas…');
 
   try {
-    const ahora = new Date();
-    const ahoraISO = ahora.toISOString();
+    // Obtener hora actual en zona Venezuela (UTC-4) para cálculos consistentes
+    const fechaVenezuela = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Caracas' }));
+    const ahoraISO = fechaVenezuela.toISOString();
 
     // ---------- 1) Por vencer ----------
-    const limiteProximo = new Date(ahora);
-    limiteProximo.setDate(ahora.getDate() + DIAS_AVISO_PREVIO);
+    const limiteProximo = new Date(fechaVenezuela);
+    limiteProximo.setDate(fechaVenezuela.getDate() + DIAS_AVISO_PREVIO);
 
     const { data: ordenesPorVencer, error: errorPorVencer } = await supabase
       .from('ordenes')
@@ -41,7 +42,7 @@ export async function revisarVencimientos() {
 
     for (const orden of ordenesPorVencer || []) {
       const diasRestantes = Math.ceil(
-        (new Date(orden.fecha_vencimiento) - ahora) / (1000 * 60 * 60 * 24)
+        (new Date(orden.fecha_vencimiento) - fechaVenezuela) / (1000 * 60 * 60 * 24)
       );
       await crearNotificacion(
         orden.usuario_id,

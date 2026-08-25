@@ -1,3 +1,4 @@
+import { supabase } from '../config/supabase.js';
 import { crearNotificacion } from './notificaciones.controller.js';
 
 // GET /facturas?usuario_id= (admin)
@@ -181,7 +182,7 @@ export async function getOrdenesSinFacturar(req, res) {
       .order('created_at', { ascending: false });
 
     if (idsFacturados.length > 0) {
-      query = query.not('id', 'in', `(${idsFacturados.join(',')})`);
+      query = query.not('id', 'in', idsFacturados);
     }
 
     const { data, error } = await query;

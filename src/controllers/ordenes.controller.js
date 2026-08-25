@@ -422,7 +422,7 @@ function mensajeParaTransicion(estado, forma_pago, ordenId) {
 
 // Aplica cambio de estado
 async function aplicarCambioEstado(orden, estado) {
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('ordenes')
     .update({ estado })
     .eq('id', orden.id)

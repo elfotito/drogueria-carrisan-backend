@@ -1,12 +1,8 @@
 // routes/images.js
-import { createClient } from '@supabase/supabase-js'
 import express from 'express'
+import { supabase } from '../config/supabase.js'
 
 const router = express.Router()
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_KEY
-)
 
 // 📦 Endpoint que devuelve múltiples imágenes optimizadas
 router.post('/images/batch', async (req, res) => {

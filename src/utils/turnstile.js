@@ -16,11 +16,8 @@ export async function verificarTurnstile(token, ipUsuario) {
 
   const secretKey = process.env.TURNSTILE_SECRET_KEY;
   if (!secretKey) {
-    // Si no está configurada la variable de entorno, no bloqueamos el
-    // flujo (evita romper producción por un olvido de config), pero
-    // se loguea fuerte para que se note en los logs de Render.
-    console.error('⚠️  TURNSTILE_SECRET_KEY no está configurada — verificación omitida');
-    return { valido: true };
+    console.error('🚨  TURNSTILE_SECRET_KEY no está configurada — la verificación está DESACTIVADA por seguridad. Configúrala inmediatamente en Render.');
+    return { valido: false, error: 'Error de configuración del servidor. Contacta al administrador.' };
   }
 
   try {

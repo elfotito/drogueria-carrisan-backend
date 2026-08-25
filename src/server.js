@@ -29,6 +29,8 @@ import cotizacionesRoutes from './routes/cotizaciones.routes.js';
 import { revisarVencimientos } from './jobs/revisarVencimientos.js';
 import presupuestosRoutes from './routes/presupuestos.routes.js';
 import analyticsRoutes from './routes/analytics.routes.js';
+import valoracionesRoutes from './routes/valoraciones.routes.js';
+import imagesRoutes from './routes/images.routes.js';
 
 dotenv.config();
 
@@ -83,6 +85,8 @@ app.use('/subusuarios', subusuariosRoutes);
 app.use('/cotizaciones', cotizacionesRoutes);
 app.use('/presupuestos', presupuestosRoutes);
 app.use('/admin/analytics', analyticsRoutes);
+app.use('/products', valoracionesRoutes);
+app.use('/images', imagesRoutes);
 
 
 
