@@ -15,13 +15,54 @@ webpush.setVapidDetails(
   vapidPrivateKey || ''
 );
 
-// Códigos HTTP que indican que la subscription ya no es válida y debe eliminarse.
 const SUBSCRIPTION_INVALIDA = [404, 410];
 
-// Envía un push a todas las subscriptions activas de un usuario.
-// Si una subscription ya expiró o fue revocada (410/404), la borramos.
-export async function enviarPushAlUsuario(usuario_id, { titulo, mensaje, url }) {
+// Mapeo tipo de notificación -> categoría de preferencia
+const TIPO_A_CATEGORIA = {
+  orden_creada: 'ordenes',
+  orden_confirmada: 'ordenes',
+  orden_enviada: 'ordenes',
+  orden_entregada: 'ordenes',
+  orden_cancelada: 'ordenes',
+  estado_cambiado: 'ordenes',
+  orden_actualizada: 'ordenes',
+  pago_registrado: 'pagos',
+  pago_recibido: 'pagos',
+  pago_rechazado: 'pagos',
+  pago_reportado: 'pagos',
+  pago_verificado: 'pagos',
+  chat_mensaje: 'chat',
+  orden_por_vencer: 'credito',
+  orden_vencida: 'credito',
+  oferta: 'ofertas',
+};
+
+function getCategoria(tipo) {
+  return TIPO_A_CATEGORIA[tipo] || 'sistema';
+}
+
+async function quierePush(usuario_id, tipo) {
+  try {
+    const categoria = getCategoria(tipo);
+    const { data } = await supabase
+      .from('notificacion_preferencias')
+      .select('push_activo, push_ordenes, push_pagos, push_chat, push_credito, push_sistema')
+      .eq('usuario_id', usuario_id)
+      .single();
+
+    if (!data) return true;
+    if (!data.push_activo) return false;
+    const campo = `push_${categoria}`;
+    return data[campo] !== false;
+  } catch {
+    return true;
+  }
+}
+
+export async function enviarPushAlUsuario(usuario_id, { titulo, mensaje, url, tipo }) {
   if (!vapidPublicKey || !vapidPrivateKey) return;
+
+  if (tipo && !(await quierePush(usuario_id, tipo))) return;
 
   const { data: subs, error } = await supabase
     .from('push_subscriptions')

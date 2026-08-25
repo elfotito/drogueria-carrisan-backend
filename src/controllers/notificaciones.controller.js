@@ -1,6 +1,89 @@
 import { supabase } from '../config/supabase.js';
 import { enviarPushAlUsuario } from '../services/push.service.js';
 
+const PREFERENCIAS_DEFAULTS = {
+  push_activo: true,
+  push_ordenes: true,
+  push_pagos: true,
+  push_chat: true,
+  push_credito: true,
+  push_sistema: true,
+  push_ofertas: true,
+};
+
+// GET /notifications/preferences - Obtener preferencias del usuario
+export async function getPreferencias(req, res) {
+  try {
+    let { data, error } = await supabase
+      .from('notificacion_preferencias')
+      .select('*')
+      .eq('usuario_id', req.user.id)
+      .single();
+
+    if (error || !data) {
+      data = { usuario_id: req.user.id, ...PREFERENCIAS_DEFAULTS };
+    }
+
+    res.json(data);
+  } catch (err) {
+    console.error('Error al obtener preferencias:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
+// PUT /notifications/preferences - Actualizar preferencias del usuario
+export async function actualizarPreferencias(req, res) {
+  const camposPermitidos = ['push_activo', 'push_ordenes', 'push_pagos', 'push_chat', 'push_credito', 'push_sistema', 'push_ofertas'];
+  const actualizaciones = {};
+
+  for (const campo of camposPermitidos) {
+    if (campo in req.body) {
+      actualizaciones[campo] = Boolean(req.body[campo]);
+    }
+  }
+
+  if (Object.keys(actualizaciones).length === 0) {
+    return res.status(400).json({ error: 'No se proporcionaron campos para actualizar' });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('notificacion_preferencias')
+      .upsert(
+        { usuario_id: req.user.id, ...actualizaciones },
+        { onConflict: 'usuario_id' }
+      )
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    console.error('Error al actualizar preferencias:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
+// Helper: verificar si un usuario quiere recibir push para una categoría
+export async function quierePush(usuario_id, categoria) {
+  try {
+    const { data } = await supabase
+      .from('notificacion_preferencias')
+      .select('push_activo')
+      .eq('usuario_id', usuario_id)
+      .single();
+
+    if (!data) return true;
+    if (!data.push_activo) return false;
+
+    const campo = `push_${categoria}`;
+    if (campo in data) return data[campo];
+    return true;
+  } catch {
+    return true;
+  }
+}
+
 
 // GET /notifications - Obtener notificaciones del usuario autenticado
 export async function getNotificaciones(req, res) {
@@ -91,7 +174,7 @@ export async function crearNotificacion(usuario_id, tipo, titulo, mensaje, orden
     }
 
     const url = orden_id ? `/orders/${orden_id}` : '/';
-    await enviarPushAlUsuario(usuario_id, { titulo, mensaje, url });
+    await enviarPushAlUsuario(usuario_id, { titulo, mensaje, url, tipo });
   } catch (err) {
     console.error('Error al crear notificación:', err);
   }
