@@ -36,7 +36,7 @@ export const apiLimiter = rateLimit({
 export const uploadsRegistroLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 15,
-  message: { error: 'Demasiadas subidas de archivos. Intenta de nuevo en unos minutos.' },
+  message: { error: 'Demasiados intentos de subidas de archivos. Intenta de nuevo en unos minutos.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
