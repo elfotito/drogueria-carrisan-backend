@@ -1,4 +1,6 @@
 import { supabase } from '../config/supabase.js';
+import { enviarPushAlUsuario } from '../services/push.service.js';
+
 
 // GET /notifications - Obtener notificaciones del usuario autenticado
 export async function getNotificaciones(req, res) {
@@ -82,6 +84,8 @@ export async function crearNotificacion(usuario_id, tipo, titulo, mensaje, orden
     const { error } = await supabase
       .from('notificaciones')
       .insert({ usuario_id, tipo, titulo, mensaje, orden_id });
+
+await enviarPushAlUsuario(usuario_id, { titulo, mensaje: mensaje, url: `/ordenes/${orden_id}` });
 
     if (error) console.error('Error al crear notificación:', error);
   } catch (err) {
