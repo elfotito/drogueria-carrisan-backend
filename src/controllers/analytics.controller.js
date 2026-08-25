@@ -171,3 +171,53 @@ export async function getEstadoCuentaClientes(req, res) {
     res.status(500).json({ error: 'Error del servidor' });
   }
 }
+
+// GET /admin/analytics/productos?desde=&hasta=&limite=10
+// Top productos más vendidos por cantidad e ingresos, en el rango de fechas.
+export async function getTopProductos(req, res) {
+  const limite = Number(req.query.limite) || 10;
+  const hasta = req.query.hasta ? new Date(req.query.hasta) : new Date();
+  const desde = req.query.desde
+    ? new Date(req.query.desde)
+    : new Date(hasta.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+  const hastaFinDelDia = new Date(hasta);
+  hastaFinDelDia.setUTCHours(23, 59, 59, 999);
+
+  try {
+    // Traemos las órdenes del rango (no canceladas) con sus items y el nombre del producto.
+    const { data: ordenes, error } = await supabase
+      .from('ordenes')
+      .select('id, ordenes_items(producto_id, cantidad, precio_unitario, productos(nombre_comercial))')
+      .neq('estado', 'cancelado')
+      .gte('created_at', desde.toISOString())
+      .lte('created_at', hastaFinDelDia.toISOString());
+
+    if (error) throw error;
+
+    const porProducto = new Map();
+
+    for (const orden of ordenes) {
+      for (const item of orden.ordenes_items) {
+        const actual = porProducto.get(item.producto_id) || {
+          producto_id: item.producto_id,
+          nombre: item.productos?.nombre_comercial || 'Producto eliminado',
+          cantidad_vendida: 0,
+          ingresos_usd: 0
+        };
+        actual.cantidad_vendida += item.cantidad;
+        actual.ingresos_usd += item.cantidad * Number(item.precio_unitario);
+        porProducto.set(item.producto_id, actual);
+      }
+    }
+
+    const top = Array.from(porProducto.values())
+      .sort((a, b) => b.cantidad_vendida - a.cantidad_vendida)
+      .slice(0, limite);
+
+    res.json(top);
+  } catch (err) {
+    console.error('Error al obtener top de productos:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
