@@ -113,3 +113,61 @@ export async function getVentasPorPeriodo(req, res) {
     res.status(500).json({ error: 'Error del servidor' });
   }
 }
+
+// GET /admin/analytics/clientes — estado de cuenta de cada cliente
+// (línea de crédito, facturado, pagado, deuda y saldo disponible).
+export async function getEstadoCuentaClientes(req, res) {
+  try {
+    const { data: clientes, error: errorClientes } = await supabase
+      .from('users')
+      .select('id, nombre, email, linea_credito')
+      .eq('es_admin', false);
+
+    if (errorClientes) throw errorClientes;
+
+    const { data: facturas, error: errorFacturas } = await supabase
+      .from('facturas')
+      .select('usuario_id, monto_facturado');
+    if (errorFacturas) throw errorFacturas;
+
+    const { data: pagos, error: errorPagos } = await supabase
+      .from('pagos')
+      .select('usuario_id, monto');
+    if (errorPagos) throw errorPagos;
+
+    const facturadoPorCliente = new Map();
+    for (const f of facturas) {
+      facturadoPorCliente.set(f.usuario_id, (facturadoPorCliente.get(f.usuario_id) || 0) + Number(f.monto_facturado));
+    }
+    const pagadoPorCliente = new Map();
+    for (const p of pagos) {
+      pagadoPorCliente.set(p.usuario_id, (pagadoPorCliente.get(p.usuario_id) || 0) + Number(p.monto));
+    }
+
+    const resultado = clientes.map(cliente => {
+      const total_facturado = facturadoPorCliente.get(cliente.id) || 0;
+      const total_pagado = pagadoPorCliente.get(cliente.id) || 0;
+      const deuda_actual = total_facturado - total_pagado;
+      const saldo_disponible = Number(cliente.linea_credito) - deuda_actual;
+
+      return {
+        id: cliente.id,
+        nombre: cliente.nombre,
+        email: cliente.email,
+        linea_credito: Number(cliente.linea_credito),
+        total_facturado,
+        total_pagado,
+        deuda_actual,
+        saldo_disponible
+      };
+    });
+
+    // Clientes con más deuda primero — son los que más le interesan al admin.
+    resultado.sort((a, b) => b.deuda_actual - a.deuda_actual);
+
+    res.json(resultado);
+  } catch (err) {
+    console.error('Error al obtener estado de cuenta de clientes:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
