@@ -9,7 +9,7 @@ import {
   getHistorial,
 } from '../controllers/promociones.controller.js';
 import { verifyJWT } from '../middleware/auth.js';
-import { soloAdmin } from '../middleware/soloAdmin.middleware.js';
+import soloAdmin from '../middleware/soloAdmin.middleware.js';
 
 const router = Router();
 
