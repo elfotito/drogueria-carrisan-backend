@@ -28,6 +28,7 @@ import subusuariosRoutes from './routes/subusuarios.routes.js';
 import cotizacionesRoutes from './routes/cotizaciones.routes.js';
 import { revisarVencimientos } from './jobs/revisarVencimientos.js';
 import presupuestosRoutes from './routes/presupuestos.routes.js';
+import analyticsRoutes from './routes/analytics.routes.js';
 
 dotenv.config();
 
@@ -81,6 +82,8 @@ app.use('/chat', chatRoutes);
 app.use('/subusuarios', subusuariosRoutes);
 app.use('/cotizaciones', cotizacionesRoutes);
 app.use('/presupuestos', presupuestosRoutes);
+app.use('/admin/analytics', analyticsRoutes);
+
 
 
 app.listen(PORT, () => {
