@@ -40,3 +40,15 @@ export const uploadsRegistroLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+
+// Límite para push subscriptions: un usuario solo necesita suscribirse
+// una vez por sesión (o al re-login). 10 cada 15 min es generoso para
+// reintentos y cambio de navegador, pero frenan abuso de creación masiva
+// de subscriptions que saturarían la cola de envío.
+export const pushLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { error: 'Demasiadas solicitudes de suscripción. Intenta de nuevo en unos minutos.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
