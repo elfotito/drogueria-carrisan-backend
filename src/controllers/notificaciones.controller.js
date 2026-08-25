@@ -85,9 +85,13 @@ export async function crearNotificacion(usuario_id, tipo, titulo, mensaje, orden
       .from('notificaciones')
       .insert({ usuario_id, tipo, titulo, mensaje, orden_id });
 
-await enviarPushAlUsuario(usuario_id, { titulo, mensaje: mensaje, url: `/ordenes/${orden_id}` });
+    if (error) {
+      console.error('Error al crear notificación:', error);
+      return;
+    }
 
-    if (error) console.error('Error al crear notificación:', error);
+    const url = orden_id ? `/orders/${orden_id}` : '/';
+    await enviarPushAlUsuario(usuario_id, { titulo, mensaje, url });
   } catch (err) {
     console.error('Error al crear notificación:', err);
   }
