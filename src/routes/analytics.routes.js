@@ -1,8 +1,6 @@
 import { Router } from 'express';
-import { getVentasPorPeriodo } from '../controllers/analytics.controller.js';
-import { verifyJWT, verifyAdmin } from '../middleware/auth.js';
-import { getVentasPorPeriodo, getEstadoCuentaClientes } from '../controllers/analytics.controller.js';
 import { getVentasPorPeriodo, getEstadoCuentaClientes, getTopProductos } from '../controllers/analytics.controller.js';
+import { verifyJWT, verifyAdmin } from '../middleware/auth.js';
 
 const router = Router();
 
