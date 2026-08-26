@@ -33,6 +33,7 @@ import valoracionesRoutes from './routes/valoraciones.routes.js';
 import imagesRoutes from './routes/images.routes.js';
 import imagesUploadRoutes from './routes/imagesUpload.routes.js';
 import promocionesRoutes from './routes/promociones.routes.js';
+import tarifasDeliveryRoutes from './routes/tarifasDelivery.routes.js';
 
 dotenv.config();
 
@@ -91,6 +92,7 @@ app.use('/products', valoracionesRoutes);
 app.use('/images', imagesRoutes);
 app.use('/images', imagesUploadRoutes);
 app.use('/promotions', promocionesRoutes);
+app.use('/delivery-tarifas', tarifasDeliveryRoutes);
 
 
 

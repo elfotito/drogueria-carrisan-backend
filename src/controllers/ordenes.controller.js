@@ -143,21 +143,23 @@ export async function createOrden(req, res) {
   try {
     // --- Validar dirección/agencia según el tipo de envío elegido ---
     let direccionValidada = null;
+    let direccion = null;
     if (tipoEnvioValido === 'delivery' || tipoEnvioValido === 'envio_nacional') {
       if (!direccion_envio_id) {
         return res.status(400).json({ error: 'Debes seleccionar una dirección de envío' });
       }
 
-      const { data: direccion, error: errorDireccion } = await supabase
+      const { data: dir, error: errorDireccion } = await supabase
         .from('direcciones_envio')
-        .select('id, usuario_id, activo')
+        .select('id, usuario_id, ciudad, activo')
         .eq('id', direccion_envio_id)
         .single();
 
-      if (errorDireccion || !direccion || direccion.usuario_id !== usuario_id || !direccion.activo) {
+      if (errorDireccion || !dir || dir.usuario_id !== usuario_id || !dir.activo) {
         return res.status(400).json({ error: 'Dirección de envío inválida' });
       }
-      direccionValidada = direccion.id;
+      direccion = dir;
+      direccionValidada = dir.id;
     }
 
     if (tipoEnvioValido === 'envio_nacional' && !agencia_envio) {
@@ -178,7 +180,18 @@ export async function createOrden(req, res) {
       if (errorClienteDelivery || !clienteDelivery) {
         return res.status(400).json({ error: 'Usuario no encontrado' });
       }
-      envio = clienteDelivery.delivery_gratis ? 0 : 8.00;
+
+      if (clienteDelivery.delivery_gratis) {
+        envio = 0;
+      } else {
+        const { data: tarifa } = await supabase
+          .from('tarifas_delivery')
+          .select('costo')
+          .eq('ciudad', direccion.ciudad)
+          .eq('activo', true)
+          .single();
+        envio = tarifa?.costo ?? 8.00;
+      }
     }
     // 'envio_nacional' se paga en destino (0 acá) y 'retiro' no tiene costo.
 
@@ -330,7 +343,7 @@ export async function getOrdenes(req, res) {
   try {
     let query = supabase
       .from('ordenes')
-      .select('*, users(id, nombre, email), ordenes_items(*, productos(nombre_comercial))')
+      .select('*, users(id, nombre, email), direcciones_envio(direccion, ciudad, estado), ordenes_items(*, productos(nombre_comercial))')
       .order('created_at', { ascending: false });
 
     if (!req.user.es_admin) {
@@ -362,7 +375,7 @@ export async function getOrdenById(req, res) {
   try {
     const { data, error } = await supabase
       .from('ordenes')
-      .select('*, users(id, nombre, email), ordenes_items(*, productos(nombre_comercial))')
+      .select('*, users(id, nombre, email), direcciones_envio(direccion, ciudad, estado), ordenes_items(*, productos(nombre_comercial))')
       .eq('id', id)
       .single();
 
@@ -396,6 +409,44 @@ export async function getOrdenById(req, res) {
     res.json(ordenNormalizada);
   } catch (err) {
     console.error('Error al obtener orden:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
+// GET /orders/delivery-pendientes — Ordenes delivery en preparación + enviados recientes
+export async function getDeliveryPendientes(req, res) {
+  try {
+    const { data: pendientes, error: errorPendientes } = await supabase
+      .from('ordenes')
+      .select('*, users(id, nombre, email, telefono), direcciones_envio(direccion, ciudad, estado), ordenes_items(*, productos(nombre_comercial))')
+      .eq('tipo_envio', 'delivery')
+      .eq('estado', 'preparando')
+      .order('created_at', { ascending: true });
+
+    if (errorPendientes) throw errorPendientes;
+
+    const { data: enviadosRecientes, error: errorEnviados } = await supabase
+      .from('ordenes')
+      .select('*, users(id, nombre, email, telefono), direcciones_envio(direccion, ciudad, estado), ordenes_items(*, productos(nombre_comercial))')
+      .eq('tipo_envio', 'delivery')
+      .eq('estado', 'enviado')
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    if (errorEnviados) throw errorEnviados;
+
+    res.json({
+      pendientes: (pendientes || []).map(o => ({
+        ...o,
+        ordenes_items: Array.isArray(o.ordenes_items) ? o.ordenes_items : []
+      })),
+      enviadosRecientes: (enviadosRecientes || []).map(o => ({
+        ...o,
+        ordenes_items: Array.isArray(o.ordenes_items) ? o.ordenes_items : []
+      }))
+    });
+  } catch (err) {
+    console.error('Error al obtener deliveries pendientes:', err);
     res.status(500).json({ error: 'Error del servidor' });
   }
 }

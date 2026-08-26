@@ -64,26 +64,6 @@ export async function actualizarPreferencias(req, res) {
   }
 }
 
-// Helper: verificar si un usuario quiere recibir push para una categoría
-export async function quierePush(usuario_id, categoria) {
-  try {
-    const { data } = await supabase
-      .from('notificacion_preferencias')
-      .select('push_activo')
-      .eq('usuario_id', usuario_id)
-      .single();
-
-    if (!data) return true;
-    if (!data.push_activo) return false;
-
-    const campo = `push_${categoria}`;
-    if (campo in data) return data[campo];
-    return true;
-  } catch {
-    return true;
-  }
-}
-
 
 // GET /notifications - Obtener notificaciones del usuario autenticado
 export async function getNotificaciones(req, res) {

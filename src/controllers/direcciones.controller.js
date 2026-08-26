@@ -68,6 +68,62 @@ export async function createDireccion(req, res) {
   }
 }
 
+// PUT /direcciones/:id
+export async function updateDireccion(req, res) {
+  try {
+    const { id } = req.params;
+    const { 
+      nombre, 
+      direccion, 
+      ciudad, 
+      estado, 
+      telefono_contacto, 
+      referencia,
+      tipo_direccion,
+      agencia_preferida 
+    } = req.body;
+
+    const { data: existente, error: errorBusqueda } = await supabase
+      .from('direcciones_envio')
+      .select('id, usuario_id')
+      .eq('id', id)
+      .eq('usuario_id', req.user.id)
+      .single();
+
+    if (errorBusqueda || !existente) {
+      return res.status(404).json({ error: 'Dirección no encontrada' });
+    }
+
+    const updates = {};
+    if (nombre !== undefined) updates.nombre = nombre;
+    if (direccion !== undefined) updates.direccion = direccion;
+    if (ciudad !== undefined) updates.ciudad = ciudad;
+    if (estado !== undefined) updates.estado = estado;
+    if (telefono_contacto !== undefined) updates.telefono_contacto = telefono_contacto;
+    if (referencia !== undefined) updates.referencia = referencia;
+    if (tipo_direccion !== undefined) updates.tipo_direccion = tipo_direccion;
+    if (agencia_preferida !== undefined) updates.agencia_preferida = agencia_preferida;
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: 'No se proporcionaron campos para actualizar' });
+    }
+
+    const { data, error } = await supabase
+      .from('direcciones_envio')
+      .update(updates)
+      .eq('id', id)
+      .eq('usuario_id', req.user.id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    console.error('Error al actualizar dirección:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
 // DELETE /direcciones/:id (soft delete)
 export async function deleteDireccion(req, res) {
   try {

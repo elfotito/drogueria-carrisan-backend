@@ -1,5 +1,5 @@
 import { supabase } from '../config/supabase.js';
-import webpush from 'web-push';
+import { enviarPushAlUsuario } from '../services/push.service.js';
 
 // GET /promotions/templates - Listar plantillas (admin)
 export async function getPlantillas(req, res) {
@@ -102,33 +102,18 @@ export async function enviarPromocion(req, res) {
       return res.status(404).json({ error: 'Plantilla no encontrada' });
     }
 
-    // Obtener todos los usuarios con push activo y categoría ofertas
-    const { data: preferencias, error: errorPrefs } = await supabase
-      .from('notificacion_preferencias')
-      .select('usuario_id')
-      .eq('push_activo', true)
-      .eq('push_ofertas', true);
-
-    if (errorPrefs) throw errorPrefs;
-
-    const usuarioIds = (preferencias || []).map(p => p.usuario_id);
-
-    // También incluir usuarios sin preferencias (defaults: ofertas=true)
+    // Obtener todos los usuarios con suscripciones push activas
     const { data: todosConSub } = await supabase
       .from('push_subscriptions')
       .select('user_id')
       .neq('user_id', null);
 
-    const todosIds = [...new Set([
-      ...usuarioIds,
-      ...(todosConSub || []).map(s => s.user_id).filter(uid => !usuarioIds.includes(uid)),
-    ])];
+    const usuarioIds = [...new Set((todosConSub || []).map(s => s.user_id))];
 
     let enviadas = 0;
-    let fallos = 0;
     const url = '/';
 
-    for (const usuario_id of todosIds) {
+    for (const usuario_id of usuarioIds) {
       try {
         // Crear notificación in-app
         await supabase
@@ -141,39 +126,16 @@ export async function enviarPromocion(req, res) {
             orden_id: null,
           });
 
-        // Enviar push si el usuario tiene suscripciones activas
-        const { data: subs } = await supabase
-          .from('push_subscriptions')
-          .select('*')
-          .eq('user_id', usuario_id);
-
-        if (subs && subs.length > 0) {
-          const payload = JSON.stringify({
-            titulo: plantilla.titulo,
-            mensaje: plantilla.mensaje,
-            url,
-          });
-
-          for (const sub of subs) {
-            try {
-              await webpush.sendNotification(
-                {
-                  endpoint: sub.endpoint,
-                  keys: { p256dh: sub.p256dh, auth: sub.auth },
-                },
-                payload
-              );
-              enviadas++;
-            } catch (err) {
-              fallos++;
-              if ([404, 410].includes(err.statusCode)) {
-                await supabase.from('push_subscriptions').delete().eq('id', sub.id);
-              }
-            }
-          }
-        }
+        // Enviar push (respeta preferencias del usuario)
+        await enviarPushAlUsuario(usuario_id, {
+          titulo: plantilla.titulo,
+          mensaje: plantilla.mensaje,
+          url,
+          tipo: 'oferta',
+        });
+        enviadas++;
       } catch {
-        fallos++;
+        // Error individual no detiene el lote
       }
     }
 
@@ -186,16 +148,16 @@ export async function enviarPromocion(req, res) {
         mensaje: plantilla.mensaje,
         descuento_pct: plantilla.descuento_pct,
         codigo_cupon: plantilla.codigo_cupon,
-        usuarios_total: todosIds.length,
+        usuarios_total: usuarioIds.length,
         enviadas,
-        fallos,
+        fallos: 0,
       });
 
     res.json({
       ok: true,
-      usuarios_total: todosIds.length,
+      usuarios_total: usuarioIds.length,
       enviadas,
-      fallos,
+      fallos: 0,
     });
   } catch (err) {
     console.error('Error al enviar promoción:', err);
@@ -212,29 +174,17 @@ export async function enviarPromocionCustom(req, res) {
   }
 
   try {
-    const { data: preferencias } = await supabase
-      .from('notificacion_preferencias')
-      .select('usuario_id')
-      .eq('push_activo', true)
-      .eq('push_ofertas', true);
-
-    const usuarioPrefsIds = (preferencias || []).map(p => p.usuario_id);
-
     const { data: todosConSub } = await supabase
       .from('push_subscriptions')
       .select('user_id')
       .neq('user_id', null);
 
-    const todosIds = [...new Set([
-      ...usuarioPrefsIds,
-      ...(todosConSub || []).map(s => s.user_id).filter(uid => !usuarioPrefsIds.includes(uid)),
-    ])];
+    const usuarioIds = [...new Set((todosConSub || []).map(s => s.user_id))];
 
     let enviadas = 0;
-    let fallos = 0;
     const url = '/';
 
-    for (const usuario_id of todosIds) {
+    for (const usuario_id of usuarioIds) {
       try {
         await supabase
           .from('notificaciones')
@@ -246,34 +196,10 @@ export async function enviarPromocionCustom(req, res) {
             orden_id: null,
           });
 
-        const { data: subs } = await supabase
-          .from('push_subscriptions')
-          .select('*')
-          .eq('user_id', usuario_id);
-
-        if (subs && subs.length > 0) {
-          const payload = JSON.stringify({ titulo, mensaje, url });
-
-          for (const sub of subs) {
-            try {
-              await webpush.sendNotification(
-                {
-                  endpoint: sub.endpoint,
-                  keys: { p256dh: sub.p256dh, auth: sub.auth },
-                },
-                payload
-              );
-              enviadas++;
-            } catch (err) {
-              fallos++;
-              if ([404, 410].includes(err.statusCode)) {
-                await supabase.from('push_subscriptions').delete().eq('id', sub.id);
-              }
-            }
-          }
-        }
+        await enviarPushAlUsuario(usuario_id, { titulo, mensaje, url, tipo: 'oferta' });
+        enviadas++;
       } catch {
-        fallos++;
+        // Error individual no detiene el lote
       }
     }
 
@@ -284,12 +210,12 @@ export async function enviarPromocionCustom(req, res) {
         mensaje,
         descuento_pct,
         codigo_cupon,
-        usuarios_total: todosIds.length,
+        usuarios_total: usuarioIds.length,
         enviadas,
-        fallos,
+        fallos: 0,
       });
 
-    res.json({ ok: true, usuarios_total: todosIds.length, enviadas, fallos });
+    res.json({ ok: true, usuarios_total: usuarioIds.length, enviadas, fallos: 0 });
   } catch (err) {
     console.error('Error al enviar promoción custom:', err);
     res.status(500).json({ error: 'Error del servidor' });

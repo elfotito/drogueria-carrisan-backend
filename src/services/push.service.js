@@ -46,7 +46,7 @@ async function quierePush(usuario_id, tipo) {
     const categoria = getCategoria(tipo);
     const { data } = await supabase
       .from('notificacion_preferencias')
-      .select('push_activo, push_ordenes, push_pagos, push_chat, push_credito, push_sistema')
+      .select('push_activo, push_ordenes, push_pagos, push_chat, push_credito, push_sistema, push_ofertas')
       .eq('usuario_id', usuario_id)
       .single();
 
@@ -60,16 +60,31 @@ async function quierePush(usuario_id, tipo) {
 }
 
 export async function enviarPushAlUsuario(usuario_id, { titulo, mensaje, url, tipo }) {
-  if (!vapidPublicKey || !vapidPrivateKey) return;
+  if (!vapidPublicKey || !vapidPrivateKey) {
+    console.warn(`[Push] Saltado envío a user ${usuario_id}: faltan VAPID keys en el servidor`);
+    return;
+  }
 
-  if (tipo && !(await quierePush(usuario_id, tipo))) return;
+  if (tipo && !(await quierePush(usuario_id, tipo))) {
+    console.log(`[Push] Saltado envío a user ${usuario_id}: no quiere push para tipo "${tipo}"`);
+    return;
+  }
 
   const { data: subs, error } = await supabase
     .from('push_subscriptions')
     .select('*')
       .eq('user_id', usuario_id);
 
-  if (error || !subs || subs.length === 0) return;
+  if (error) {
+    console.error(`[Push] Error consultando suscripciones de user ${usuario_id}:`, error.message);
+    return;
+  }
+  if (!subs || subs.length === 0) {
+    console.log(`[Push] Sin suscripciones push para user ${usuario_id}`);
+    return;
+  }
+
+  console.log(`[Push] Enviando a user ${usuario_id}: ${subs.length} suscripciones, tipo="${tipo}"`);
 
   const payload = JSON.stringify({ titulo, mensaje, url: url || '/' });
 
@@ -83,17 +98,19 @@ export async function enviarPushAlUsuario(usuario_id, { titulo, mensaje, url, ti
       await webpush.sendNotification(subscription, payload);
     } catch (err) {
       if (SUBSCRIPTION_INVALIDA.includes(err.statusCode)) {
+        console.warn(`[Push] Suscripción inválida (sub ${sub.id}), eliminando`);
         await supabase.from('push_subscriptions').delete().eq('id', sub.id);
       } else if (err.statusCode === 413) {
-        console.warn(`Push rechazado (payload demasiado grande) para sub ${sub.id}`);
+        console.warn(`[Push] Payload demasiado grande para sub ${sub.id}`);
       } else {
-        console.error(`Error enviando push a sub ${sub.id}:`, err.message);
+        console.error(`[Push] Error enviando a sub ${sub.id}:`, err.message, `(statusCode: ${err.statusCode})`);
       }
     }
   }));
 
+  const exitos = resultados.filter(r => r.status === 'fulfilled');
   const fallos = resultados.filter(r => r.status === 'rejected');
-  if (fallos.length > 0) {
-    console.error(`Push: ${fallos.length}/${subs.length} envíos fallaron`);
+  if (fallos.length > 0 || exitos.length > 0) {
+    console.log(`[Push] Resultado user ${usuario_id}: ${exitos.length} éxitos, ${fallos.length} fallos`);
   }
 }
