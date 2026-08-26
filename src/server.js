@@ -40,6 +40,11 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Render (y la mayoría de hosts cloud) usa un reverse proxy. Sin esto,
+// express-rate-limit no puede identificar IPs reales y lanza warnings.
+// '1' = confiar en el primer X-Forwarded-For header.
+app.set('trust proxy', 1);
+
 
 const allowedOrigins = process.env.FRONTEND_URL
   ? process.env.FRONTEND_URL.split(',').map(o => o.trim())
