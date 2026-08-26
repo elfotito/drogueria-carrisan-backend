@@ -25,7 +25,7 @@ export async function suscribir(req, res) {
     const { error } = await supabase
       .from('push_subscriptions')
       .upsert(
-        { usuario_id, endpoint, keys_p256dh: keys.p256dh, keys_auth: keys.auth },
+        { user_id: usuario_id, endpoint, p256dh: keys.p256dh, auth: keys.auth },
         { onConflict: 'endpoint' }
       );
 
@@ -52,7 +52,7 @@ export async function desuscribir(req, res) {
       .from('push_subscriptions')
       .select('id')
       .eq('endpoint', endpoint)
-      .eq('usuario_id', req.user.id)
+      .eq('user_id', req.user.id)
       .single();
 
     if (errorBusqueda || !sub) {

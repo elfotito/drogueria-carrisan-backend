@@ -116,12 +116,12 @@ export async function enviarPromocion(req, res) {
     // También incluir usuarios sin preferencias (defaults: ofertas=true)
     const { data: todosConSub } = await supabase
       .from('push_subscriptions')
-      .select('usuario_id')
-      .neq('usuario_id', null);
+      .select('user_id')
+      .neq('user_id', null);
 
     const todosIds = [...new Set([
       ...usuarioIds,
-      ...(todosConSub || []).map(s => s.usuario_id).filter(uid => !usuarioIds.includes(uid)),
+      ...(todosConSub || []).map(s => s.user_id).filter(uid => !usuarioIds.includes(uid)),
     ])];
 
     let enviadas = 0;
@@ -145,7 +145,7 @@ export async function enviarPromocion(req, res) {
         const { data: subs } = await supabase
           .from('push_subscriptions')
           .select('*')
-          .eq('usuario_id', usuario_id);
+          .eq('user_id', usuario_id);
 
         if (subs && subs.length > 0) {
           const payload = JSON.stringify({
@@ -159,7 +159,7 @@ export async function enviarPromocion(req, res) {
               await webpush.sendNotification(
                 {
                   endpoint: sub.endpoint,
-                  keys: { p256dh: sub.keys_p256dh, auth: sub.keys_auth },
+                  keys: { p256dh: sub.p256dh, auth: sub.auth },
                 },
                 payload
               );
@@ -222,12 +222,12 @@ export async function enviarPromocionCustom(req, res) {
 
     const { data: todosConSub } = await supabase
       .from('push_subscriptions')
-      .select('usuario_id')
-      .neq('usuario_id', null);
+      .select('user_id')
+      .neq('user_id', null);
 
     const todosIds = [...new Set([
       ...usuarioPrefsIds,
-      ...(todosConSub || []).map(s => s.usuario_id).filter(uid => !usuarioPrefsIds.includes(uid)),
+      ...(todosConSub || []).map(s => s.user_id).filter(uid => !usuarioPrefsIds.includes(uid)),
     ])];
 
     let enviadas = 0;
@@ -249,7 +249,7 @@ export async function enviarPromocionCustom(req, res) {
         const { data: subs } = await supabase
           .from('push_subscriptions')
           .select('*')
-          .eq('usuario_id', usuario_id);
+          .eq('user_id', usuario_id);
 
         if (subs && subs.length > 0) {
           const payload = JSON.stringify({ titulo, mensaje, url });
@@ -259,7 +259,7 @@ export async function enviarPromocionCustom(req, res) {
               await webpush.sendNotification(
                 {
                   endpoint: sub.endpoint,
-                  keys: { p256dh: sub.keys_p256dh, auth: sub.keys_auth },
+                  keys: { p256dh: sub.p256dh, auth: sub.auth },
                 },
                 payload
               );

@@ -67,7 +67,7 @@ export async function enviarPushAlUsuario(usuario_id, { titulo, mensaje, url, ti
   const { data: subs, error } = await supabase
     .from('push_subscriptions')
     .select('*')
-    .eq('usuario_id', usuario_id);
+      .eq('user_id', usuario_id);
 
   if (error || !subs || subs.length === 0) return;
 
@@ -76,7 +76,7 @@ export async function enviarPushAlUsuario(usuario_id, { titulo, mensaje, url, ti
   const resultados = await Promise.allSettled(subs.map(async sub => {
     const subscription = {
       endpoint: sub.endpoint,
-      keys: { p256dh: sub.keys_p256dh, auth: sub.keys_auth }
+      keys: { p256dh: sub.p256dh, auth: sub.auth }
     };
 
     try {
