@@ -179,3 +179,35 @@ export async function crearNotificacion(usuario_id, tipo, titulo, mensaje, orden
     console.error('Error al crear notificación:', err);
   }
 }
+
+// GET /notifications/preferences
+export async function getPreferencias(req, res) {
+  try {
+    const { data, error } = await supabase
+      .from('notificacion_preferencias')
+      .select('*')
+      .eq('usuario_id', req.user.id)
+      .maybeSingle();
+    if (error) throw error;
+    res.json(data || {});
+  } catch (err) {
+    console.error('Error al obtener preferencias:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
+// PUT /notifications/preferences
+export async function actualizarPreferencias(req, res) {
+  try {
+    const { data, error } = await supabase
+      .from('notificacion_preferencias')
+      .upsert({ usuario_id: req.user.id, ...req.body }, { onConflict: 'usuario_id' })
+      .select()
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    console.error('Error al actualizar preferencias:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
