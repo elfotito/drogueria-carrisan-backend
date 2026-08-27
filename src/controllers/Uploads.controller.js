@@ -1,29 +1,16 @@
-import { google } from 'googleapis';
-import { Readable } from 'stream';
+import { supabase } from '../config/supabase.js';
 
 // ---------------------------------------------------------------
-// Cliente OAuth2 autenticado como tesoreria.dcarrisan@gmail.com.
-// Usa un refresh_token generado UNA VEZ localmente (ver
-// obtener-refresh-token.js) — nunca vence, Google emite access_tokens
-// nuevos automáticamente con esta librería.
+// Bucket público (mismo modelo de confianza que se tenía con Drive:
+// "cualquiera con el link" — solo que ahora el link es una URL de
+// Supabase Storage con nombre no adivinable, en vez de un fileId de
+// Google). Debe existir y estar marcado como público en el panel de
+// Supabase (Storage → crsndocs → Public bucket).
 // ---------------------------------------------------------------
-const oauth2Client = new google.auth.OAuth2(
-  process.env.GOOGLE_DRIVE_CLIENT_ID,
-  process.env.GOOGLE_DRIVE_CLIENT_SECRET
-);
-
-oauth2Client.setCredentials({
-  refresh_token: process.env.GOOGLE_DRIVE_REFRESH_TOKEN,
-});
-
-const drive = google.drive({ version: 'v3', auth: oauth2Client });
-
-// Carpeta de Drive donde se guardan los comprobantes. Opcional: si no
-// se define, los archivos se suben a la raíz del Drive de la cuenta.
-const FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID || null;
+const BUCKET = 'crsndocs';
 
 const TIPOS_PERMITIDOS = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
-const TAMANO_MAXIMO_BYTES = 10 * 1024 * 1024; // 10 MB
+const TAMANO_MAXIMO_BYTES = 2 * 1024 * 1024; // 2 MB
 
 // POST /uploads/comprobante (cliente, multipart/form-data, campo "archivo")
 export async function subirComprobante(req, res) {
@@ -36,60 +23,48 @@ export async function subirComprobante(req, res) {
     return res.status(400).json({ error: 'Formato no permitido. Usa JPG, PNG, WEBP o PDF.' });
   }
   if (archivo.size > TAMANO_MAXIMO_BYTES) {
-    return res.status(400).json({ error: 'El archivo supera el tamaño máximo de 10MB' });
+    return res.status(400).json({ error: 'El archivo supera el tamaño máximo de 2MB' });
   }
 
   try {
     const usuario_id = req.user.id;
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).substring(2, 8);
     const extension = archivo.originalname.split('.').pop();
-    const nombreArchivo = `comprobante_u${usuario_id}_${timestamp}.${extension}`;
+    const nombreArchivo = `comprobantes/u${usuario_id}_${timestamp}-${random}.${extension}`;
 
-    const { data } = await drive.files.create({
-      requestBody: {
-        name: nombreArchivo,
-        parents: FOLDER_ID ? [FOLDER_ID] : undefined,
-      },
-      media: {
-        mimeType: archivo.mimetype,
-        body: Readable.from(archivo.buffer),
-      },
-      fields: 'id, webViewLink',
-    });
+    const { error } = await supabase.storage
+      .from(BUCKET)
+      .upload(nombreArchivo, archivo.buffer, {
+        contentType: archivo.mimetype,
+        upsert: false,
+      });
 
-    // El archivo se sube privado por defecto. Le damos acceso de "lector"
-    // a cualquiera con el link para que el admin pueda abrirlo directo
-    // desde el panel sin tener que loguearse con tesoreria.dcarrisan.
-    await drive.permissions.create({
-      fileId: data.id,
-      requestBody: { role: 'reader', type: 'anyone' },
-    });
+    if (error) {
+      console.error('Error al subir comprobante a Supabase Storage:', error);
+      return res.status(500).json({ error: 'No se pudo subir el comprobante. Intenta de nuevo.' });
+    }
 
-    res.status(201).json({
-      url: data.webViewLink,
-      drive_file_id: data.id,
-    });
+    const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(nombreArchivo);
+
+    res.status(201).json({ url: urlData.publicUrl });
   } catch (err) {
-    console.error('Error al subir comprobante a Drive:', err);
+    console.error('Error al subir comprobante:', err);
     res.status(500).json({ error: 'No se pudo subir el comprobante. Intenta de nuevo.' });
   }
 }
-
-// Carpeta separada para documentos de registro (RIF, permiso sanitario,
-// registro mercantil, certificado profesional). Si no se define, caen
-// en la raíz del mismo Drive que los comprobantes de pago.
-const FOLDER_ID_REGISTRO = process.env.GOOGLE_DRIVE_FOLDER_ID_REGISTRO || FOLDER_ID;
 
 const TIPOS_PERMITIDOS_REGISTRO = ['application/pdf'];
 
 // POST /uploads/registro (público, multipart/form-data, campo "archivo")
 // Sin verifyJWT: durante el registro el usuario todavía no tiene cuenta
 // ni token. Protegido por rate limiting general de /uploads + validación
-// estricta de tipo/tamaño. Los archivos quedan "sueltos" en Drive hasta
-// que el registro se completa y sus URLs se asocian al user_id recién
-// creado (ver auth.controller.js → register). Si alguien sube un archivo
-// y abandona el formulario, queda huérfano en Drive — aceptable, se
-// puede limpiar manualmente si se acumulan.
+// estricta de tipo/tamaño. Los archivos quedan "sueltos" en el bucket
+// hasta que el registro se completa y sus URLs se asocian al user_id
+// recién creado (ver auth.controller.js → register). Si alguien sube un
+// archivo y abandona el formulario, queda huérfano en el bucket —
+// aceptable, se puede limpiar manualmente si se acumulan (igual que
+// pasaba antes con Drive).
 export async function subirArchivoRegistro(req, res) {
   const archivo = req.file;
   const { tipo_documento } = req.body; // rif | permiso_sanitario | registro_mercantil | certificado_acreditacion (solo para nombrar el archivo)
@@ -101,40 +76,32 @@ export async function subirArchivoRegistro(req, res) {
     return res.status(400).json({ error: 'Formato no permitido. Solo se aceptan PDF.' });
   }
   if (archivo.size > TAMANO_MAXIMO_BYTES) {
-    return res.status(400).json({ error: 'El archivo supera el tamaño máximo de 10MB' });
+    return res.status(400).json({ error: 'El archivo supera el tamaño máximo de 2MB' });
   }
 
   try {
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).substring(2, 8);
     const etiquetaDocumento = tipo_documento || 'documento';
-    const nombreArchivo = `registro_${etiquetaDocumento}_${timestamp}.pdf`;
+    const nombreArchivo = `registro/${etiquetaDocumento}_${timestamp}-${random}.pdf`;
 
-    const { data } = await drive.files.create({
-      requestBody: {
-        name: nombreArchivo,
-        parents: FOLDER_ID_REGISTRO ? [FOLDER_ID_REGISTRO] : undefined,
-      },
-      media: {
-        mimeType: archivo.mimetype,
-        body: Readable.from(archivo.buffer),
-      },
-      fields: 'id, webViewLink',
-    });
+    const { error } = await supabase.storage
+      .from(BUCKET)
+      .upload(nombreArchivo, archivo.buffer, {
+        contentType: 'application/pdf',
+        upsert: false,
+      });
 
-    // Privado por defecto en Drive; le damos acceso de lector a
-    // cualquiera con el link para que el admin lo abra directo desde
-    // el panel de verificación de cuentas.
-    await drive.permissions.create({
-      fileId: data.id,
-      requestBody: { role: 'reader', type: 'anyone' },
-    });
+    if (error) {
+      console.error('Error al subir archivo de registro a Supabase Storage:', error);
+      return res.status(500).json({ error: 'No se pudo subir el archivo. Intenta de nuevo.' });
+    }
 
-    res.status(201).json({
-      url: data.webViewLink,
-      drive_file_id: data.id,
-    });
+    const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(nombreArchivo);
+
+    res.status(201).json({ url: urlData.publicUrl });
   } catch (err) {
-    console.error('Error al subir archivo de registro a Drive:', err);
+    console.error('Error al subir archivo de registro:', err);
     res.status(500).json({ error: 'No se pudo subir el archivo. Intenta de nuevo.' });
   }
 }

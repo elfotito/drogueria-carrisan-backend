@@ -6,7 +6,7 @@ import { uploadsRegistroLimiter } from '../middleware/Ratelimit.js';
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB, doble chequeo (multer + controller)
+  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB, doble chequeo (multer + controller)
 });
 
 const router = Router();
