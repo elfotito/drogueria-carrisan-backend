@@ -1,5 +1,6 @@
 import { supabase } from '../config/supabase.js';
 import { enviarPushAlUsuario } from '../services/push.service.js';
+import { limpiezaNotificaciones } from '../jobs/limpiezaNotificaciones.js';
 
 const PREFERENCIAS_DEFAULTS = {
   push_activo: true,
@@ -138,6 +139,17 @@ export async function marcarTodasLeidas(req, res) {
   } catch (err) {
     console.error('Error al marcar todas:', err);
     res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
+// DELETE /notifications/cleanup - Limpiar notificaciones antiguas (solo admin)
+export async function cleanupNotificaciones(req, res) {
+  try {
+    await limpiezaNotificaciones();
+    res.json({ message: 'Limpieza de notificaciones ejecutada correctamente' });
+  } catch (err) {
+    console.error('Error al ejecutar limpieza:', err);
+    res.status(500).json({ error: 'Error al ejecutar limpieza' });
   }
 }
 

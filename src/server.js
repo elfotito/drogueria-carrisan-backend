@@ -27,6 +27,7 @@ import chatRoutes from './routes/chat.routes.js';
 import subusuariosRoutes from './routes/subusuarios.routes.js';
 import cotizacionesRoutes from './routes/cotizaciones.routes.js';
 import { revisarVencimientos } from './jobs/revisarVencimientos.js';
+import { limpiezaNotificaciones } from './jobs/limpiezaNotificaciones.js';
 import presupuestosRoutes from './routes/presupuestos.routes.js';
 import analyticsRoutes from './routes/analytics.routes.js';
 import valoracionesRoutes from './routes/valoraciones.routes.js';
@@ -112,5 +113,14 @@ app.listen(PORT, () => {
 // de Venezuela (America/Caracas, UTC-4, sin cambio de horario).
 // -----------------------------------------------------------------
 cron.schedule('0 8 * * *', revisarVencimientos, {
+  timezone: 'America/Caracas',
+});
+
+// -----------------------------------------------------------------
+// Job diario de limpieza: elimina notificaciones antiguas según
+// política de retención (ofertas 7d, leídas 30d, no leídas 60d).
+// Corre todos los días a las 3:00am hora de Venezuela.
+// -----------------------------------------------------------------
+cron.schedule('0 3 * * *', limpiezaNotificaciones, {
   timezone: 'America/Caracas',
 });

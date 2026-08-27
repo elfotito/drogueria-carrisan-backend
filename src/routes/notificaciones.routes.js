@@ -6,8 +6,10 @@ import {
   marcarTodasLeidas,
   getPreferencias,
   actualizarPreferencias,
+  cleanupNotificaciones,
 } from '../controllers/notificaciones.controller.js';
 import { verifyJWT } from '../middleware/auth.js';
+import soloAdmin from '../middleware/soloAdmin.middleware.js';
 
 const router = Router();
 
@@ -17,5 +19,6 @@ router.get('/', verifyJWT, getNotificaciones);
 router.get('/unread-count', verifyJWT, getUnreadCount);
 router.patch('/read-all', verifyJWT, marcarTodasLeidas);
 router.patch('/:id', verifyJWT, marcarLeida);
+router.delete('/cleanup', verifyJWT, soloAdmin, cleanupNotificaciones);
 
 export default router;
