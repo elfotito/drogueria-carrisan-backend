@@ -23,11 +23,14 @@ export async function getTasaCambio(req, res) {
 
 // PATCH /prices/tasa-cambio (admin)
 export async function updateTasaCambio(req, res) {
-  const { usd_a_ves } = req.body;
+  let { usd_a_ves } = req.body;
 
   if (!usd_a_ves || usd_a_ves <= 0) {
     return res.status(400).json({ error: 'usd_a_ves debe ser un número mayor a 0' });
   }
+
+  // Siempre redondear a 4 decimales para evitar problemas de precisión
+  usd_a_ves = Number(Number(usd_a_ves).toFixed(4));
 
   try {
     // Insertamos una fila nueva en vez de actualizar (así queda historial de tasas)
