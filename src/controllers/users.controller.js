@@ -162,6 +162,29 @@ export async function updateUser(req, res) {
   }
 }
 
+// POST /users/:id/solicitar-reinicio (admin) - activar reinicio de clave
+export async function solicitarReinicio(req, res) {
+  const { id } = req.params;
+
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .update({ reinicio_clave: true })
+      .eq('id', id)
+      .select('id, nombre, email')
+      .single();
+
+    if (error || !data) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+
+    res.json({ mensaje: 'Reinicio de clave autorizado', usuario: data });
+  } catch (err) {
+    console.error('Error al solicitar reinicio:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
 // DELETE /users/:id (admin)
 export async function deleteUser(req, res) {
   const { id } = req.params;

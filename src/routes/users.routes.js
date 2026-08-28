@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getUsers, createUser, updateUser, deleteUser } from '../controllers/users.controller.js';
+import { getUsers, createUser, updateUser, deleteUser, solicitarReinicio } from '../controllers/users.controller.js';
 import { verifyJWT, verifyAdmin } from '../middleware/auth.js';
 
 const router = Router();
@@ -10,6 +10,7 @@ router.use(verifyJWT, verifyAdmin);
 router.get('/', getUsers);
 router.post('/', createUser);
 router.patch('/:id', updateUser);
+router.post('/:id/solicitar-reinicio', solicitarReinicio);
 router.delete('/:id', deleteUser);
 
 export default router;

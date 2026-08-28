@@ -52,3 +52,14 @@ export const pushLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+
+// Límite estricto para reset-password: es un endpoint público que cambia
+// contraseñas. Solo funciona si el admin autorizó, pero queremos frenar
+// intentos de fuerza bruta contra cuentas que tengan reinicio_clave = true.
+export const resetPasswordLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  max: 5,
+  message: { error: 'Demasiados intentos. Intenta de nuevo en unos minutos.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});

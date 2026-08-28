@@ -300,6 +300,62 @@ export async function register(req, res) {
   }
 }
 
+// POST /auth/reset-password
+// Permite cambiar la contraseña solo si el admin autorizó el reinicio
+// (reinicio_clave === true). Después de actualizar, vuelve a false y
+// incrementa token_version para revocar todas las sesiones activas.
+export async function resetPassword(req, res) {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email y nueva contraseña son requeridos' });
+  }
+
+  if (password.length < 6) {
+    return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
+  }
+
+  try {
+    const emailNormalizado = email.trim().toLowerCase();
+
+    // 1. Buscar el usuario
+    const { data: user, error: fetchError } = await supabase
+      .from('users')
+      .select('id, reinicio_clave, token_version')
+      .eq('email', emailNormalizado)
+      .single();
+
+    if (fetchError || !user) {
+      // Mensaje genérico a propósito — no decimos si el email existe
+      return res.status(400).json({ error: 'No se pudo procesar la solicitud' });
+    }
+
+    // 2. Verificar que el admin autorizó el reinicio
+    if (!user.reinicio_clave) {
+      return res.status(403).json({ error: 'No se autorizó el reinicio de contraseña. Contactá al administrador.' });
+    }
+
+    // 3. Hashear la nueva contraseña y actualizar
+    const password_hash = await bcrypt.hash(password, 10);
+
+    const { error: updateError } = await supabase
+      .from('users')
+      .update({
+        password_hash,
+        reinicio_clave: false,
+        token_version: (user.token_version ?? 0) + 1,
+      })
+      .eq('id', user.id);
+
+    if (updateError) throw updateError;
+
+    res.json({ mensaje: 'Contraseña actualizada correctamente' });
+  } catch (err) {
+    console.error('Error en resetPassword:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
 // GET /auth/verify
 export async function verify(req, res) {
   // Si llegó hasta acá, el middleware verifyJWT ya validó el token
