@@ -207,6 +207,20 @@ export async function createOrden(req, res) {
         return res.status(400).json({ error: 'Sub-usuario inválido' });
       }
       subUsuarioValidado = subUsuario.id;
+    } else {
+      // Si la cuenta tiene sub-usuarios activos configurados, identificar
+      // quién hace el pedido deja de ser opcional: sin esto, cualquiera
+      // con la sesión abierta podría comprar sin dejar rastro de cuál
+      // miembro del equipo lo hizo (todo el propósito de la feature).
+      const { count: subUsuariosActivos } = await supabase
+        .from('sub_usuarios')
+        .select('id', { count: 'exact', head: true })
+        .eq('usuario_id', usuario_id)
+        .eq('activo', true);
+
+      if (subUsuariosActivos > 0) {
+        return res.status(400).json({ error: 'Debes indicar el PIN de quién hace este pedido' });
+      }
     }
 
     const productoIds = items.map(item => item.producto_id);
