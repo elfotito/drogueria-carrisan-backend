@@ -1,6 +1,34 @@
 import { supabase } from '../config/supabase.js';
 import { aplicarDescuentosAProductos, aplicarDescuentoAProducto } from './descuentos.controller.js';
 
+// Enriquece una lista de productos con rating_promedio y rating_total
+// usando un único batch query a la tabla valoraciones.
+async function enriquecerConValoraciones(productos) {
+  if (!productos || productos.length === 0) return productos;
+
+  const ids = productos.map((p) => p.id);
+  const { data: valoraciones } = await supabase
+    .from('valoraciones')
+    .select('producto_id, estrellas')
+    .in('producto_id', ids);
+
+  const mapa = {};
+  for (const v of valoraciones || []) {
+    if (!mapa[v.producto_id]) mapa[v.producto_id] = { sum: 0, count: 0 };
+    mapa[v.producto_id].sum += v.estrellas;
+    mapa[v.producto_id].count++;
+  }
+
+  return productos.map((p) => {
+    const r = mapa[p.id];
+    return {
+      ...p,
+      rating_promedio: r ? Math.round((r.sum / r.count) * 10) / 10 : null,
+      rating_total: r ? r.count : 0,
+    };
+  });
+}
+
 // GET /products?search=&marca_id=&sort=
 export async function getProductos(req, res) {
   const { search, marca_id, sort } = req.query;
@@ -40,7 +68,10 @@ export async function getProductos(req, res) {
     // 👇 único agregado: enriquece cada producto con precio_usd final (si tiene descuento vigente)
     const productosConDescuento = await aplicarDescuentosAProductos(data);
 
-    res.json(productosConDescuento);
+    // Enriquecer con rating_promedio y rating_total
+    const productosConRating = await enriquecerConValoraciones(productosConDescuento);
+
+    res.json(productosConRating);
   } catch (err) {
     console.error('Error al obtener productos:', err);
     res.status(500).json({ error: 'Error del servidor' });
@@ -65,7 +96,10 @@ export async function getProductoById(req, res) {
     // 👇 único agregado
     const productoConDescuento = await aplicarDescuentoAProducto(data);
 
-    res.json(productoConDescuento);
+    // Enriquecer con rating_promedio y rating_total
+    const [productoConRating] = await enriquecerConValoraciones([productoConDescuento]);
+
+    res.json(productoConRating);
   } catch (err) {
     console.error('Error al obtener producto:', err);
     res.status(500).json({ error: 'Error del servidor' });
