@@ -2,6 +2,7 @@ import { supabase } from '../config/supabase.js';
 import { crearNotificacion } from './notificaciones.controller.js';
 
 const HORAS_VIGENCIA_AUTOMATICA = 72;
+const HORAS_ENFRIAMIENTO_AUTOMATICA = 72;
 
 // Catálogo de tipos de documento. Agregar uno nuevo = una línea acá.
 // url: solo aplica a los automáticos (viene de variable de entorno).
@@ -15,7 +16,9 @@ export const TIPOS_DOCUMENTO = {
 // ---------------------------------------------------------------
 // POST /documentos (cliente)
 // Body: { tipo_documento, descripcion }
-// Si el tipo es automático, se aprueba y responde de inmediato.
+// Si el tipo es automático, se aprueba y responde de inmediato —
+// salvo que el usuario todavía esté en el enfriamiento de una solicitud
+// anterior (ventana de 72h + 72h más antes de poder pedirlo de nuevo).
 // ---------------------------------------------------------------
 export async function crearSolicitudDocumento(req, res) {
   const { tipo_documento, descripcion } = req.body;
@@ -28,6 +31,7 @@ export async function crearSolicitudDocumento(req, res) {
 
   try {
     const ahora = new Date();
+
     const payload = {
       usuario_id,
       tipo_documento,
@@ -39,9 +43,38 @@ export async function crearSolicitudDocumento(req, res) {
       if (!tipo.url) {
         return res.status(500).json({ error: 'Este documento no está configurado todavía' });
       }
+
+      // ¿Sigue en enfriamiento por una solicitud anterior de este mismo tipo?
+      const { data: ultima, error: errorUltima } = await supabase
+        .from('solicitudes_documentos')
+        .select('fecha_expiracion')
+        .eq('usuario_id', usuario_id)
+        .eq('tipo_documento', tipo_documento)
+        .eq('es_automatica', true)
+        .not('fecha_expiracion', 'is', null)
+        .order('fecha_solicitud', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (errorUltima) throw errorUltima;
+
+      if (ultima?.fecha_expiracion) {
+        const disponibleEn = new Date(
+          new Date(ultima.fecha_expiracion).getTime() + HORAS_ENFRIAMIENTO_AUTOMATICA * 60 * 60 * 1000
+        );
+        if (ahora < disponibleEn) {
+          return res.status(429).json({
+            error: 'Todavía no puedes solicitar este documento de nuevo',
+            disponible_en: disponibleEn.toISOString(),
+          });
+        }
+      }
+
       payload.estado = 'aprobada';
       payload.fecha_respuesta = ahora.toISOString();
-      payload.fecha_expiracion = new Date(ahora.getTime() + HORAS_VIGENCIA_AUTOMATICA * 60 * 60 * 1000).toISOString();
+      payload.fecha_expiracion = new Date(
+        ahora.getTime() + HORAS_VIGENCIA_AUTOMATICA * 60 * 60 * 1000
+      ).toISOString();
       payload.url_documento = tipo.url;
     }
 
@@ -135,7 +168,6 @@ export async function aprobarSolicitudDocumento(req, res) {
     if (errorSolicitud || !solicitud) {
       return res.status(404).json({ error: 'Solicitud no encontrada' });
     }
-
     if (solicitud.estado !== 'pendiente') {
       return res.status(400).json({ error: 'Esta solicitud ya fue procesada' });
     }
@@ -183,7 +215,6 @@ export async function rechazarSolicitudDocumento(req, res) {
     if (errorSolicitud || !solicitud) {
       return res.status(404).json({ error: 'Solicitud no encontrada' });
     }
-
     if (solicitud.estado !== 'pendiente') {
       return res.status(400).json({ error: 'Esta solicitud ya fue procesada' });
     }
