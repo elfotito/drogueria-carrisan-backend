@@ -207,7 +207,7 @@ const UMBRALES_AMPLIACION = [
   { factor: 0.5, porcentaje: 15 },
 ];
 
-async function calcularPromedioMensual(usuario_id) {
+async function calcularComprasTrimestre(usuario_id) {
   const hace3Meses = new Date();
   hace3Meses.setMonth(hace3Meses.getMonth() - 3);
 
@@ -220,8 +220,8 @@ async function calcularPromedioMensual(usuario_id) {
 
   if (error) throw error;
 
-  const total = ordenes.reduce((sum, o) => sum + Number(o.total_usd), 0);
-  return total / 3;
+  const total_trimestre = ordenes.reduce((sum, o) => sum + Number(o.total_usd), 0);
+  return { total_trimestre, promedio_mensual: total_trimestre / 3 };
 }
 
 // GET /:id/estado-cuenta/ampliacion-elegibilidad
@@ -245,13 +245,14 @@ export async function getElegibilidadAmpliacion(req, res) {
     }
 
     const linea_actual = Number(cliente.linea_credito || 0);
-    const promedio_mensual = await calcularPromedioMensual(usuario_id);
+    const { total_trimestre, promedio_mensual } = await calcularComprasTrimestre(usuario_id);
 
     let nivel = UMBRALES_AMPLIACION.find(u => promedio_mensual >= linea_actual * u.factor);
 
     res.json({
       linea_actual,
       promedio_mensual,
+      total_trimestre,
       califica: !!nivel,
       porcentaje_disponible: nivel?.porcentaje || 0,
       monto_adicional: nivel ? linea_actual * (nivel.porcentaje / 100) : 0,
@@ -284,7 +285,7 @@ export async function solicitarAmpliacion(req, res) {
     }
 
     const linea_actual = Number(cliente.linea_credito || 0);
-    const promedio_mensual = await calcularPromedioMensual(usuario_id);
+    const { promedio_mensual } = await calcularComprasTrimestre(usuario_id);
     const nivel = UMBRALES_AMPLIACION.find(u => promedio_mensual >= linea_actual * u.factor);
 
     if (!nivel) {
