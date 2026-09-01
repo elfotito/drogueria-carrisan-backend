@@ -29,9 +29,26 @@ async function enriquecerConValoraciones(productos) {
   });
 }
 
-// GET /products?search=&marca_id=&sort=
+// GET /products?search=&marca_id=&sort=&linea=&laboratorio=&forma=&disponible=&precio_min=&precio_max=
+//   → devuelve un ARRAY con todos los resultados (backward-compatible: así lo
+//     consumen Home, Carrito, Ofertas, resultados de búsqueda, admin, etc.)
+// GET /products?page=&limit=&... (iguales filtros)
+//   → devuelve UN OBJETO paginado { productos, total, page, limit, hasMore }
+//     para que el catálogo haga infinite scroll sin bajar todo.
 export async function getProductos(req, res) {
-  const { search, marca_id, sort } = req.query;
+  const {
+    search,
+    marca_id,
+    sort,
+    page,
+    limit,
+    linea,
+    laboratorio,
+    forma,
+    disponible,
+    precio_min,
+    precio_max,
+  } = req.query;
 
   // Mapa de valores permitidos de "sort" -> columna real + dirección
   // (whitelist explícita para no pasar strings arbitrarios directo a Supabase)
@@ -44,12 +61,20 @@ export async function getProductos(req, res) {
 
   const orden = opcionesOrden[sort] || opcionesOrden.nombre_asc;
 
+  // ¿Paginación activa? Solo si llega "page" (los demás consumidores que no
+  // mandan page siguen recibiendo el array completo, como antes).
+  const paginaPide = page !== undefined && page !== '';
+  const paginaActual = Math.max(1, parseInt(page, 10) || 1);
+  const limite = Math.min(100, Math.max(1, parseInt(limit, 10) || 24));
+  const desde = (paginaActual - 1) * limite;
+  const hasta = desde + limite - 1;
+
   try {
     let query = supabase
-  .from('productos')
-  .select('*, marcas(id, nombre)')
-  .eq('activo', true)
-  .eq('visible_catalogo', true)
+      .from('productos')
+      .select('*, marcas(id, nombre)', { count: 'exact' })
+      .eq('activo', true)
+      .eq('visible_catalogo', true);
 
     if (search) {
       query = query.ilike('nombre_comercial', `%${search}%`);
@@ -59,21 +84,91 @@ export async function getProductos(req, res) {
       query = query.eq('marca_id', marca_id);
     }
 
-    const { data, error } = await query.order(orden.column, {
-      ascending: orden.ascending,
-    });
+    if (linea) {
+      query = query.eq('linea', linea);
+    }
+
+    // Multi-select por laboratorio/forma: vienen como "A,B,C"
+    if (laboratorio) {
+      query = query.in('laboratorio', laboratorio.split(','));
+    }
+
+    if (forma) {
+      query = query.in('forma', forma.split(','));
+    }
+
+    if (disponible === 'true') {
+      query = query.eq('disponible', true);
+    }
+
+    if (precio_min !== undefined && precio_min !== '') {
+      query = query.gte('precio_usd', Number(precio_min));
+    }
+
+    if (precio_max !== undefined && precio_max !== '') {
+      query = query.lte('precio_usd', Number(precio_max));
+    }
+
+    if (paginaPide) {
+      query = query.order(orden.column, { ascending: orden.ascending }).range(desde, hasta);
+    } else {
+      query = query.order(orden.column, { ascending: orden.ascending });
+    }
+
+    const { data, error, count } = await query;
 
     if (error) throw error;
 
-    // 👇 único agregado: enriquece cada producto con precio_usd final (si tiene descuento vigente)
-    const productosConDescuento = await aplicarDescuentosAProductos(data);
-
-    // Enriquecer con rating_promedio y rating_total
+    // Enriquece con descuentos (precio_final) y ratings
+    const productosConDescuento = await aplicarDescuentosAProductos(data || []);
     const productosConRating = await enriquecerConValoraciones(productosConDescuento);
 
-    res.json(productosConRating);
+    // Modo array (backward-compatible) vs. modo paginado (catálogo con infinite scroll)
+    if (paginaPide) {
+      res.json({
+        productos: productosConRating,
+        total: count ?? productosConRating.length,
+        page: paginaActual,
+        limit: limite,
+        hasMore: count != null ? desde + productosConRating.length < count : productosConRating.length >= limite,
+      });
+    } else {
+      res.json(productosConRating);
+    }
   } catch (err) {
     console.error('Error al obtener productos:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
+// GET /products/metadata
+// Devuelve las listas únicas de laboratorios y formas + el total del catálogo,
+// para llenar los filtros del sidebar sin tener que descargar todos los productos.
+export async function getProductosMetadata(req, res) {
+  try {
+    const base = () =>
+      supabase.from('productos').select('laboratorio, forma').eq('activo', true).eq('visible_catalogo', true);
+
+    const [resLab, resForma, resCount] = await Promise.all([
+      base().not('laboratorio', 'is', null),
+      base().not('forma', 'is', null),
+      supabase.from('productos').select('id', { count: 'exact', head: true }).eq('activo', true).eq('visible_catalogo', true),
+    ]);
+
+    if (resLab.error || resForma.error || resCount.error) {
+      throw resLab.error || resForma.error || resCount.error;
+    }
+
+    const laboratorios = Array.from(new Set((resLab.data || []).map((p) => p.laboratorio).filter(Boolean))).sort();
+    const formas = Array.from(new Set((resForma.data || []).map((p) => p.forma).filter(Boolean))).sort();
+
+    res.json({
+      laboratorios,
+      formas,
+      totalCatalogo: resCount.count ?? 0,
+    });
+  } catch (err) {
+    console.error('Error al obtener metadata de productos:', err);
     res.status(500).json({ error: 'Error del servidor' });
   }
 }
