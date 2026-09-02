@@ -388,7 +388,8 @@ export async function createDetallesProducto(req, res) {
   const {
     indicaciones, contraindicaciones, dosis_recomendada, via_administracion,
     efectos_secundarios, precauciones, codigo_atc_producto, titular_registro,
-    registro_sanitario, presentacion, unidades_por_presentacion, condiciones_almacenamiento
+    registro_sanitario, presentacion, unidades_por_presentacion, condiciones_almacenamiento,
+    imagen_secundaria_urls
   } = req.body;
 
   try {
@@ -398,7 +399,8 @@ export async function createDetallesProducto(req, res) {
         producto_id,
         indicaciones, contraindicaciones, dosis_recomendada, via_administracion,
         efectos_secundarios, precauciones, codigo_atc_producto, titular_registro,
-        registro_sanitario, presentacion, unidades_por_presentacion, condiciones_almacenamiento
+        registro_sanitario, presentacion, unidades_por_presentacion, condiciones_almacenamiento,
+        imagen_secundaria_urls
       })
       .select()
       .single();
