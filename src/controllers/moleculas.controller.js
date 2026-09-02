@@ -459,6 +459,55 @@ export async function deleteDetallesProducto(req, res) {
 // ENDPOINT COMBINADO (consumo público — ProductoDetalle.jsx)
 // =================================================================
 
+// GET /moleculas/productos/:producto_id/relacionados-por-molecula
+// Devuelve otros productos activos que comparten al menos una molécula
+// (normalizada) con el producto dado. Usado por el carrusel "Mismo
+// principio activo" en ProductoDetalle.jsx.
+export async function getProductosRelacionadosPorMolecula(req, res) {
+  const { producto_id } = req.params;
+
+  try {
+    // 1) IDs de las moléculas de este producto
+    const { data: propias, error: errorPropias } = await supabase
+      .from('producto_moleculas')
+      .select('molecula_id')
+      .eq('producto_id', producto_id);
+
+    if (errorPropias) throw errorPropias;
+
+    const moleculaIds = (propias || []).map((r) => r.molecula_id);
+    if (moleculaIds.length === 0) {
+      return res.json([]); // este producto no tiene moléculas cargadas todavía
+    }
+
+    // 2) otros productos (activos, visibles) que usen alguna de esas moléculas
+    const { data: relaciones, error: errorRelaciones } = await supabase
+      .from('producto_moleculas')
+      .select('producto_id, productos(*, marcas(id, nombre))')
+      .in('molecula_id', moleculaIds)
+      .neq('producto_id', producto_id);
+
+    if (errorRelaciones) throw errorRelaciones;
+
+    // Deduplicar (un producto puede compartir varias moléculas con el original)
+    const vistos = new Set();
+    const productos = [];
+    for (const r of relaciones || []) {
+      const p = r.productos;
+      if (!p || vistos.has(p.id)) continue;
+      if (!p.activo || !p.visible_catalogo) continue;
+      vistos.add(p.id);
+      productos.push(p);
+    }
+
+    res.json(productos);
+  } catch (err) {
+    console.error('Error al obtener productos relacionados por molécula:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
+
 // GET /products/:id/completo
 // Devuelve producto + ficha técnica + moléculas en una sola respuesta,
 // pensado para cargar ProductoDetalle.jsx con una sola llamada.
