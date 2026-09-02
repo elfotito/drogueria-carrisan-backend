@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
-import cron from 'node-cron';
+
 import authRoutes from './routes/auth.routes.js';
 import marcasRoutes from './routes/marcas.routes.js';
 import productosRoutes from './routes/productos.routes.js';
@@ -18,41 +18,21 @@ import notificacionesRoutes from './routes/notificaciones.routes.js';
 import listasRoutes from './routes/listas.routes.js';
 import direccionesRoutes from './routes/direcciones.routes.js';
 import favoritosRoutes from './routes/favoritos.routes.js';
+import moleculasRoutes from './routes/moleculas.routes.js';
 import { authLimiter, apiLimiter } from './middleware/Ratelimit.js';
 import uploadsRoutes from './routes/Uploads.routes.js';
-import pushRoutes from './routes/push.routes.js';
-import requerimientosRoutes from './routes/requerimientos.routes.js';
-import documentosRoutes from './routes/documentos.routes.js';
-import chatRoutes from './routes/chat.routes.js';
-import subusuariosRoutes from './routes/subusuarios.routes.js';
-import cotizacionesRoutes from './routes/cotizaciones.routes.js';
-import { revisarVencimientos } from './jobs/revisarVencimientos.js';
-import { limpiezaNotificaciones } from './jobs/limpiezaNotificaciones.js';
-import presupuestosRoutes from './routes/presupuestos.routes.js';
-import analyticsRoutes from './routes/analytics.routes.js';
-import valoracionesRoutes from './routes/valoraciones.routes.js';
-import imagesRoutes from './routes/images.routes.js';
-import imagesUploadRoutes from './routes/imagesUpload.routes.js';
-import promocionesRoutes from './routes/promociones.routes.js';
-import tarifasDeliveryRoutes from './routes/tarifasDelivery.routes.js';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Render (y la mayoría de hosts cloud) usa un reverse proxy. Sin esto,
-// express-rate-limit no puede identificar IPs reales y lanza warnings.
-// '1' = confiar en el primer X-Forwarded-For header.
-app.set('trust proxy', 1);
-
-
 const allowedOrigins = process.env.FRONTEND_URL
   ? process.env.FRONTEND_URL.split(',').map(o => o.trim())
   : ['http://localhost:5173'];
 
 if (!process.env.FRONTEND_URL) {
-  console.warn('⚠️  FRONTEND_URL no está definida — usando solo http://localhost:5173. Configúrala en producción.');
+  console.warn('⚠️ FRONTEND_URL no está definida — usando solo http://localhost:5173. Configúrala en producción.');
 }
 
 app.use(helmet());
@@ -86,41 +66,8 @@ app.use('/lists', listasRoutes);
 app.use('/direcciones', direccionesRoutes);
 app.use('/favoritos', favoritosRoutes);
 app.use('/uploads', uploadsRoutes);
-app.use('/push', pushRoutes);
-app.use('/requerimientos', requerimientosRoutes);
-app.use('/documentos', documentosRoutes);
-app.use('/chat', chatRoutes);
-app.use('/subusuarios', subusuariosRoutes);
-app.use('/cotizaciones', cotizacionesRoutes);
-app.use('/presupuestos', presupuestosRoutes);
-app.use('/admin/analytics', analyticsRoutes);
-app.use('/products', valoracionesRoutes);
-app.use('/images', imagesRoutes);
-app.use('/images', imagesUploadRoutes);
-app.use('/promotions', promocionesRoutes);
-app.use('/delivery-tarifas', tarifasDeliveryRoutes);
-
-
+app.use('/moleculas', moleculasRoutes);
 
 app.listen(PORT, () => {
   console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
-});
-
-// -----------------------------------------------------------------
-// Job diario de vencimientos: revisa órdenes a crédito vencidas y
-// notifica al cliente una sola vez por orden (ver src/jobs/
-// revisarVencimientos.js). Corre todos los días a las 8:00am hora
-// de Venezuela (America/Caracas, UTC-4, sin cambio de horario).
-// -----------------------------------------------------------------
-cron.schedule('0 8 * * *', revisarVencimientos, {
-  timezone: 'America/Caracas',
-});
-
-// -----------------------------------------------------------------
-// Job diario de limpieza: elimina notificaciones antiguas según
-// política de retención (ofertas 7d, leídas 30d, no leídas 60d).
-// Corre todos los días a las 3:00am hora de Venezuela.
-// -----------------------------------------------------------------
-cron.schedule('0 3 * * *', limpiezaNotificaciones, {
-  timezone: 'America/Caracas',
 });
