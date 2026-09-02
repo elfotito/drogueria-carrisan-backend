@@ -22,6 +22,7 @@ router.get('/productos/:producto_id/moleculas', getMoleculasDeProducto);
 router.get('/productos/:producto_id/detalles', getDetallesProducto);
 
 // endpoint combinado para ProductoDetalle.jsx
+// queda como GET /moleculas/products/:id/completo (montado bajo el prefijo /moleculas en server.js)
 router.get('/products/:id/completo', getProductoCompleto);
 
 // -------------------- Admin --------------------
