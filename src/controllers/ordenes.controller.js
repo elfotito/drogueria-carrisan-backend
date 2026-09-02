@@ -391,6 +391,104 @@ export async function getOrdenesPendientesPago(req, res) {
   }
 }
 
+// GET /orders/delivery-pendientes — cola de órdenes en estado 'enviado',
+// las más antiguas primero (orden de despacho). Mismo criterio que
+// getColaDespacho en staff.controller.js, expuesto también acá para el
+// panel de Admin.
+export async function getDeliveryPendientes(req, res) {
+  try {
+    const { data, error } = await supabase
+      .from('ordenes')
+      .select('*, users(id, nombre, email, telefono), direcciones_envio(direccion, ciudad, estado), ordenes_items(*, productos(nombre_comercial))')
+      .eq('estado', 'enviado')
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+    res.json((data || []).map(o => ({
+      ...o,
+      ordenes_items: Array.isArray(o.ordenes_items) ? o.ordenes_items : []
+    })));
+  } catch (err) {
+    console.error('Error al obtener órdenes pendientes de delivery:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
+// PATCH /orders/:id/items — admin ajusta cantidades de items que YA
+// existen en la orden (no agrega ni quita productos). Recalcula
+// total_usd a partir de los items resultantes.
+// Body esperado: { items: [{ id, cantidad }, ...] }
+export async function updateItemsOrden(req, res) {
+  const { id } = req.params;
+  const { items: cambios } = req.body;
+
+  if (!cambios || !Array.isArray(cambios) || cambios.length === 0) {
+    return res.status(400).json({ error: 'Debe incluir al menos un item a actualizar' });
+  }
+
+  for (const c of cambios) {
+    if (!c.id || !Number.isInteger(c.cantidad) || c.cantidad < 1) {
+      return res.status(400).json({ error: 'Cada item requiere id y una cantidad entera mayor a 0' });
+    }
+  }
+
+  try {
+    const { data: ordenActual, error: errorOrden } = await supabase
+      .from('ordenes')
+      .select('id, ordenes_items(id, producto_id, cantidad, precio_unitario)')
+      .eq('id', id)
+      .single();
+
+    if (errorOrden || !ordenActual) {
+      return res.status(404).json({ error: 'Orden no encontrada' });
+    }
+
+    const idsValidos = new Set(ordenActual.ordenes_items.map(i => i.id));
+    for (const c of cambios) {
+      if (!idsValidos.has(c.id)) {
+        return res.status(400).json({ error: `El item ${c.id} no pertenece a esta orden` });
+      }
+    }
+
+    // Aplica los cambios de cantidad, uno por uno (son pocos items por orden)
+    for (const c of cambios) {
+      const { error: errorUpdate } = await supabase
+        .from('ordenes_items')
+        .update({ cantidad: c.cantidad })
+        .eq('id', c.id);
+
+      if (errorUpdate) throw errorUpdate;
+    }
+
+    // Recalcula el total con los items ya actualizados
+    const { data: itemsFinales, error: errorItems } = await supabase
+      .from('ordenes_items')
+      .select('cantidad, precio_unitario')
+      .eq('orden_id', id);
+
+    if (errorItems) throw errorItems;
+
+    const nuevoTotal = itemsFinales.reduce(
+      (sum, i) => sum + Number(i.precio_unitario) * i.cantidad,
+      0
+    );
+
+    const { data: ordenActualizada, error: errorTotal } = await supabase
+      .from('ordenes')
+      .update({ total_usd: nuevoTotal })
+      .eq('id', id)
+      .select('*, ordenes_items(*, productos(nombre_comercial))')
+      .single();
+
+    if (errorTotal) throw errorTotal;
+
+    res.json(ordenActualizada);
+  } catch (err) {
+    console.error('Error al actualizar items de la orden:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
 // PATCH /orders/:id/estado
 export async function updateEstadoOrden(req, res) {
   const { id } = req.params;
