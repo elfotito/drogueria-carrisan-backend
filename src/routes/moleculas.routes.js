@@ -6,7 +6,7 @@ import {
   getMoleculas, getMoleculaById, createMolecula, updateMolecula, deleteMolecula,
   getMoleculasDeProducto, addMoleculaAProducto, updateProductoMolecula, removeMoleculaDeProducto,
   getDetallesProducto, createDetallesProducto, updateDetallesProducto, deleteDetallesProducto,
-  getProductoCompleto
+  getProductoCompleto, getProductosRelacionadosPorMolecula
 } from '../controllers/moleculas.controller.js';
 
 const router = express.Router();
@@ -19,6 +19,7 @@ router.get('/moleculas', getMoleculas);
 router.get('/moleculas/:id', getMoleculaById);
 
 router.get('/productos/:producto_id/moleculas', getMoleculasDeProducto);
+router.get('/productos/:producto_id/relacionados-por-molecula', getProductosRelacionadosPorMolecula);
 router.get('/productos/:producto_id/detalles', getDetallesProducto);
 
 // endpoint combinado para ProductoDetalle.jsx
