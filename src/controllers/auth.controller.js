@@ -81,9 +81,10 @@ export async function login(req, res) {
 }
 
 // POST /auth/verificar-codigo
-// Chequea si un código de invitación existe y no fue usado, sin consumirlo
-// todavía (se consume recién al completar el registro exitosamente, ver
-// más abajo). Público, sin verifyJWT — el usuario todavía no tiene cuenta.
+// Chequea si un código de invitación existe, no fue usado y no está
+// expirado, sin consumirlo todavía (se consume recién al completar el
+// registro exitosamente, ver más abajo). Público, sin verifyJWT — el
+// usuario todavía no tiene cuenta.
 export async function verificarCodigo(req, res) {
   const { codigo } = req.body;
 
@@ -96,7 +97,7 @@ export async function verificarCodigo(req, res) {
 
     const { data: registro, error } = await supabase
       .from('codigos_invitacion')
-      .select('id, usado')
+      .select('id, usado, expira_en')
       .eq('codigo', codigoNormalizado)
       .single();
 
@@ -106,6 +107,12 @@ export async function verificarCodigo(req, res) {
 
     if (registro.usado) {
       return res.status(409).json({ valido: false, error: 'Ese código ya fue utilizado' });
+    }
+
+    // Si expiró, borrarlo automáticamente y responder error
+    if (registro.expira_en && new Date(registro.expira_en) < new Date()) {
+      await supabase.from('codigos_invitacion').delete().eq('id', registro.id);
+      return res.status(410).json({ valido: false, error: 'Ese código expiró' });
     }
 
     res.json({ valido: true });
@@ -145,6 +152,18 @@ export async function register(req, res) {
     return res.status(400).json({ error: 'Faltan datos requeridos' });
   }
 
+  // Validación de contraseña: mínimo 8 caracteres + al menos 1 letra + 1
+  // número. Alineado con el frontend (validadores.js -> validarPassword).
+  // Se valida en el backend porque es el único lugar que no puede ser
+  // saltado: un cliente que llame la API directamente no pasa por la UI.
+  const tieneLetra = /[a-zA-Z]/.test(password);
+  const tieneNumero = /\d/.test(password);
+  if (password.length < 8 || !tieneLetra || !tieneNumero) {
+    return res.status(400).json({
+      error: 'La contraseña debe tener al menos 8 caracteres, incluyendo letras y números'
+    });
+  }
+
   const verificacionBot = await verificarTurnstile(turnstileToken, req.ip);
   if (!verificacionBot.valido) {
     return res.status(400).json({ error: verificacionBot.error });
@@ -180,7 +199,7 @@ export async function register(req, res) {
 
       const { data: codigoData, error: codigoError } = await supabase
         .from('codigos_invitacion')
-        .select('id, usado')
+        .select('id, usado, expira_en')
         .eq('codigo', codigo)
         .single();
 
@@ -189,6 +208,10 @@ export async function register(req, res) {
       }
       if (codigoData.usado) {
         return res.status(409).json({ error: 'Ese código de invitación ya fue utilizado' });
+      }
+      if (codigoData.expira_en && new Date(codigoData.expira_en) < new Date()) {
+        await supabase.from('codigos_invitacion').delete().eq('id', codigoData.id);
+        return res.status(410).json({ error: 'Ese código de invitación expiró' });
       }
       codigoRegistro = codigoData;
     }
@@ -292,6 +315,22 @@ export async function register(req, res) {
         .eq('id', codigoRegistro.id);
     }
 
+    // 8. Registrar las preferencias de notificación que el usuario eligió
+    // en el formulario. El frontend envía notificaciones_sistema y
+    // notificaciones_promociones; se mapean a push_sistema/push_ofertas de
+    // notificacion_preferencias (tabla creada en migración 004). Si el
+    // insert falla no se revierte el registro: los defaults (todo activo)
+    // se aplican igual al leer las preferencias.
+    try {
+      await supabase.from('notificacion_preferencias').insert({
+        usuario_id: nuevoUsuario.id,
+        push_sistema: req.body.notificaciones_sistema !== false,
+        push_ofertas: req.body.notificaciones_promociones !== false
+      });
+    } catch (errPreferencias) {
+      console.error('No se guardaron preferencias (no crítico):', errPreferencias);
+    }
+
     const { password_hash: _, ...userSinPassword } = nuevoUsuario;
     res.status(201).json({ user: userSinPassword });
   } catch (err) {
@@ -311,8 +350,10 @@ export async function resetPassword(req, res) {
     return res.status(400).json({ error: 'Email y nueva contraseña son requeridos' });
   }
 
-  if (password.length < 6) {
-    return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
+  if (password.length < 8 || !/[a-zA-Z]/.test(password) || !/\d/.test(password)) {
+    return res.status(400).json({
+      error: 'La contraseña debe tener al menos 8 caracteres, incluyendo letras y números'
+    });
   }
 
   try {

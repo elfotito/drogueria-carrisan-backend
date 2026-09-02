@@ -19,8 +19,10 @@ import listasRoutes from './routes/listas.routes.js';
 import direccionesRoutes from './routes/direcciones.routes.js';
 import favoritosRoutes from './routes/favoritos.routes.js';
 import moleculasRoutes from './routes/moleculas.routes.js';
+import codigosInvitacionRoutes from './routes/codigosInvitacion.routes.js';
 import { authLimiter, apiLimiter } from './middleware/Ratelimit.js';
 import uploadsRoutes from './routes/Uploads.routes.js';
+import staffRoutes from './routes/staff.routes.js';
 
 dotenv.config();
 
@@ -56,6 +58,7 @@ app.use('/products', productosRoutes);
 app.use('/prices', preciosRoutes);
 app.use('/orders', ordenesRoutes);
 app.use('/users', usersRoutes);
+app.use('/admin/codigos-invitacion', codigosInvitacionRoutes);
 app.use('/descuentos', descuentosRoutes);
 app.use('/facturas', facturasRoutes);
 app.use('/pagos', pagosRoutes);
@@ -67,6 +70,8 @@ app.use('/direcciones', direccionesRoutes);
 app.use('/favoritos', favoritosRoutes);
 app.use('/uploads', uploadsRoutes);
 app.use('/moleculas', moleculasRoutes);
+app.use('/staff/login', authLimiter);
+app.use('/staff', staffRoutes);
 
 app.listen(PORT, () => {
   console.log(`🚀 Servidor corriendo en puerto ${PORT}`);

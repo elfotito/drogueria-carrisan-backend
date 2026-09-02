@@ -121,81 +121,98 @@ function validarItems(items) {
 }
 
 // POST /orders
-export async function createOrden(req, res) {
+// Error controlado de validación de negocio dentro de construirOrden.
+// Permite que cada wrapper (cliente, staff) devuelva el status/mensaje
+// correcto sin duplicar los ifs de validación.
+export class ErrorOrden extends Error {
+  constructor(status, mensaje, extra = null) {
+    super(mensaje);
+    this.status = status;
+    this.extra = extra;
+  }
+}
+
+// Lógica compartida de creación de orden. usuario_id es siempre el dueño
+// de la cuenta que se factura (cliente) — quien la ejecuta (cliente vía
+// checkout, o staff vía panel de vendedor) no cambia eso, solo cambia
+// quién queda registrado como creador (ver creado_por_staff_id).
+//
+// opciones.saltarValidacionPin: cuando un vendedor crea el pedido no hay
+// sesión de cliente de la que identificar un sub-usuario por PIN — se
+// omite ese chequeo por completo (sub_usuario_id queda null) en vez de
+// forzar al vendedor a conocer el PIN del cliente.
+export async function construirOrden(usuario_id, datos, opciones = {}) {
   const {
     items, forma_pago, sub_usuario_id,
     tipo_envio, direccion_envio_id, agencia_envio,
-  } = req.body;
-
-  const usuario_id = (req.user.es_admin && req.body.usuario_id)
-    ? req.body.usuario_id
-    : req.user.id;
+  } = datos;
+  const { creado_por_staff_id = null, saltarValidacionPin = false } = opciones;
 
   const errorValidacion = validarItems(items);
   if (errorValidacion) {
-    return res.status(400).json({ error: errorValidacion });
+    throw new ErrorOrden(400, errorValidacion);
   }
 
   const TIPOS_ENVIO_VALIDOS = ['retiro', 'delivery', 'envio_nacional'];
   const tipoEnvioValido = TIPOS_ENVIO_VALIDOS.includes(tipo_envio) ? tipo_envio : 'retiro';
   const formaPagoSolicitada = forma_pago === 'credito' ? 'credito' : 'contado';
 
-  try {
-    // --- Validar dirección/agencia según el tipo de envío elegido ---
-    let direccionValidada = null;
-    let direccion = null;
-    if (tipoEnvioValido === 'delivery' || tipoEnvioValido === 'envio_nacional') {
-      if (!direccion_envio_id) {
-        return res.status(400).json({ error: 'Debes seleccionar una dirección de envío' });
-      }
+  // --- Validar dirección/agencia según el tipo de envío elegido ---
+  let direccionValidada = null;
+  let direccion = null;
+  if (tipoEnvioValido === 'delivery' || tipoEnvioValido === 'envio_nacional') {
+    if (!direccion_envio_id) {
+      throw new ErrorOrden(400, 'Debes seleccionar una dirección de envío');
+    }
 
-      const { data: dir, error: errorDireccion } = await supabase
-        .from('direcciones_envio')
-        .select('id, usuario_id, ciudad, activo')
-        .eq('id', direccion_envio_id)
+    const { data: dir, error: errorDireccion } = await supabase
+      .from('direcciones_envio')
+      .select('id, usuario_id, ciudad, activo')
+      .eq('id', direccion_envio_id)
+      .single();
+
+    if (errorDireccion || !dir || dir.usuario_id !== usuario_id || !dir.activo) {
+      throw new ErrorOrden(400, 'Dirección de envío inválida');
+    }
+    direccion = dir;
+    direccionValidada = dir.id;
+  }
+
+  if (tipoEnvioValido === 'envio_nacional' && !agencia_envio) {
+    throw new ErrorOrden(400, 'Debes indicar la agencia de envío');
+  }
+
+  // --- Costo de envío: SIEMPRE se calcula en el servidor. Nunca se
+  // confía en un costo enviado por el cliente (evita que alguien
+  // manipule la petición para llevarse el delivery gratis). ---
+  let envio = 0;
+  if (tipoEnvioValido === 'delivery') {
+    const { data: clienteDelivery, error: errorClienteDelivery } = await supabase
+      .from('users')
+      .select('delivery_gratis')
+      .eq('id', usuario_id)
+      .single();
+
+    if (errorClienteDelivery || !clienteDelivery) {
+      throw new ErrorOrden(400, 'Usuario no encontrado');
+    }
+
+    if (clienteDelivery.delivery_gratis) {
+      envio = 0;
+    } else {
+      const { data: tarifa } = await supabase
+        .from('tarifas_delivery')
+        .select('costo')
+        .eq('ciudad', direccion.ciudad)
+        .eq('activo', true)
         .single();
-
-      if (errorDireccion || !dir || dir.usuario_id !== usuario_id || !dir.activo) {
-        return res.status(400).json({ error: 'Dirección de envío inválida' });
-      }
-      direccion = dir;
-      direccionValidada = dir.id;
+      envio = tarifa?.costo ?? 8.00;
     }
+  }
+  // 'envio_nacional' se paga en destino (0 acá) y 'retiro' no tiene costo.
 
-    if (tipoEnvioValido === 'envio_nacional' && !agencia_envio) {
-      return res.status(400).json({ error: 'Debes indicar la agencia de envío' });
-    }
-
-    // --- Costo de envío: SIEMPRE se calcula en el servidor. Nunca se
-    // confía en un costo enviado por el cliente (evita que alguien
-    // manipule la petición para llevarse el delivery gratis). ---
-    let envio = 0;
-    if (tipoEnvioValido === 'delivery') {
-      const { data: clienteDelivery, error: errorClienteDelivery } = await supabase
-        .from('users')
-        .select('delivery_gratis')
-        .eq('id', usuario_id)
-        .single();
-
-      if (errorClienteDelivery || !clienteDelivery) {
-        return res.status(400).json({ error: 'Usuario no encontrado' });
-      }
-
-      if (clienteDelivery.delivery_gratis) {
-        envio = 0;
-      } else {
-        const { data: tarifa } = await supabase
-          .from('tarifas_delivery')
-          .select('costo')
-          .eq('ciudad', direccion.ciudad)
-          .eq('activo', true)
-          .single();
-        envio = tarifa?.costo ?? 8.00;
-      }
-    }
-    // 'envio_nacional' se paga en destino (0 acá) y 'retiro' no tiene costo.
-
-    let subUsuarioValidado = null;
+  let subUsuarioValidado = null;
+  if (!saltarValidacionPin) {
     if (sub_usuario_id) {
       const { data: subUsuario, error: errorSub } = await supabase
         .from('sub_usuarios')
@@ -204,7 +221,7 @@ export async function createOrden(req, res) {
         .single();
 
       if (errorSub || !subUsuario || subUsuario.usuario_id !== usuario_id || !subUsuario.activo) {
-        return res.status(400).json({ error: 'Sub-usuario inválido' });
+        throw new ErrorOrden(400, 'Sub-usuario inválido');
       }
       subUsuarioValidado = subUsuario.id;
     } else {
@@ -219,136 +236,156 @@ export async function createOrden(req, res) {
         .eq('activo', true);
 
       if (subUsuariosActivos > 0) {
-        return res.status(400).json({ error: 'Debes indicar el PIN de quién hace este pedido' });
+        throw new ErrorOrden(400, 'Debes indicar el PIN de quién hace este pedido');
       }
     }
+  }
 
-    const productoIds = items.map(item => item.producto_id);
-    const { data: productos, error: errorProductos } = await supabase
-      .from('productos')
-      .select('id, precio_usd, disponible')
-      .in('id', productoIds);
+  const productoIds = items.map(item => item.producto_id);
+  const { data: productos, error: errorProductos } = await supabase
+    .from('productos')
+    .select('id, precio_usd, disponible')
+    .in('id', productoIds);
 
-    if (errorProductos) throw errorProductos;
+  if (errorProductos) throw errorProductos;
 
-    for (const item of items) {
-      const producto = productos.find(p => p.id === item.producto_id);
-      if (!producto) {
-        return res.status(400).json({ error: `Producto ${item.producto_id} no existe` });
-      }
-      if (!producto.disponible) {
-        return res.status(400).json({ error: `Producto ${item.producto_id} no disponible` });
-      }
+  for (const item of items) {
+    const producto = productos.find(p => p.id === item.producto_id);
+    if (!producto) {
+      throw new ErrorOrden(400, `Producto ${item.producto_id} no existe`);
     }
+    if (!producto.disponible) {
+      throw new ErrorOrden(400, `Producto ${item.producto_id} no disponible`);
+    }
+  }
 
-    let total_usd = 0;
-    const itemsConPrecio = items.map(item => {
-      const producto = productos.find(p => p.id === item.producto_id);
-      const subtotal = producto.precio_usd * item.cantidad;
-      total_usd += subtotal;
-      return {
-        producto_id: item.producto_id,
-        cantidad: item.cantidad,
-        precio_unitario: producto.precio_usd
-      };
-    });
+  let total_usd = 0;
+  const itemsConPrecio = items.map(item => {
+    const producto = productos.find(p => p.id === item.producto_id);
+    const subtotal = producto.precio_usd * item.cantidad;
+    total_usd += subtotal;
+    return {
+      producto_id: item.producto_id,
+      cantidad: item.cantidad,
+      precio_unitario: producto.precio_usd
+    };
+  });
 
-    total_usd += envio;
+  total_usd += envio;
 
-    let forma_pago_final = 'contado';
-    let fecha_vencimiento = null;
+  let forma_pago_final = 'contado';
+  let fecha_vencimiento = null;
 
-    if (formaPagoSolicitada === 'credito') {
-      try {
-        const tieneVencidas = await tieneOrdenesVencidas(usuario_id);
-        
-        if (tieneVencidas) {
-          return res.status(403).json({
-            error: 'Tenés órdenes vencidas pendientes de pago. Regularizá tu cuenta para seguir comprando a crédito.',
-            codigo: 'CUENTA_CON_VENCIDAS',
-          });
+  if (formaPagoSolicitada === 'credito') {
+    try {
+      const tieneVencidas = await tieneOrdenesVencidas(usuario_id);
+
+      if (tieneVencidas) {
+        throw new ErrorOrden(
+          403,
+          'Tenés órdenes vencidas pendientes de pago. Regularizá tu cuenta para seguir comprando a crédito.',
+          { codigo: 'CUENTA_CON_VENCIDAS' }
+        );
+      }
+
+      const creditoInfo = await calcularSaldoCredito(usuario_id);
+
+      if (creditoInfo.saldo_disponible >= total_usd) {
+        forma_pago_final = 'credito';
+
+        if (creditoInfo.dias_credito) {
+          const vencimiento = new Date();
+          vencimiento.setDate(vencimiento.getDate() + Number(creditoInfo.dias_credito));
+          fecha_vencimiento = vencimiento.toISOString();
         }
-
-        const creditoInfo = await calcularSaldoCredito(usuario_id);
-        
-        if (creditoInfo.saldo_disponible >= total_usd) {
-          forma_pago_final = 'credito';
-          
-          if (creditoInfo.dias_credito) {
-            const vencimiento = new Date();
-            vencimiento.setDate(vencimiento.getDate() + Number(creditoInfo.dias_credito));
-            fecha_vencimiento = vencimiento.toISOString();
-          }
-        }
-      } catch (errorCredito) {
-        console.error('Error al validar crédito:', errorCredito);
-        forma_pago_final = 'contado';
-        fecha_vencimiento = null;
       }
+    } catch (errorCredito) {
+      if (errorCredito instanceof ErrorOrden) throw errorCredito;
+      console.error('Error al validar crédito:', errorCredito);
+      forma_pago_final = 'contado';
+      fecha_vencimiento = null;
     }
+  }
 
-    const { data: orden, error: errorOrden } = await supabase
-      .from('ordenes')
-      .insert({
-        usuario_id,
-        estado: 'pedido_creado',
-        total_usd,
-        forma_pago: forma_pago_final,
-        fecha_vencimiento,
-        sub_usuario_id: subUsuarioValidado,
-        tipo_envio: tipoEnvioValido,
-        direccion_envio_id: direccionValidada,
-        costo_envio_usd: envio,
-        agencia_envio: tipoEnvioValido === 'envio_nacional' ? agencia_envio : null,
-      })
-      .select()
-      .single();
-
-    if (errorOrden) throw errorOrden;
-
-    const itemsParaInsertar = itemsConPrecio.map(item => ({
-      ...item,
-      orden_id: orden.id
-    }));
-
-    const { error: errorItems } = await supabase
-      .from('ordenes_items')
-      .insert(itemsParaInsertar);
-
-    if (errorItems) {
-      await supabase.from('ordenes').delete().eq('id', orden.id);
-      throw errorItems;
-    }
-
-    await supabase.from('ordenes_historial').insert({
-      orden_id: orden.id,
-      estado: 'pedido_creado'
-    });
-
-    const mensajeCreacion = forma_pago_final === 'credito'
-      ? `Tu orden #${orden.id} por $${total_usd} fue recibida. Te avisaremos si hay algún ajuste en las cantidades.`
-      : `Tu orden #${orden.id} por $${total_usd} fue recibida. Te avisaremos cuando esté lista para procesar el pago.`;
-
-    await crearNotificacion(
+  const { data: orden, error: errorOrden } = await supabase
+    .from('ordenes')
+    .insert({
       usuario_id,
-      'orden_creada',
-      'Orden creada',
-      mensajeCreacion,
-      orden.id
-    );
+      estado: 'pedido_creado',
+      total_usd,
+      forma_pago: forma_pago_final,
+      fecha_vencimiento,
+      sub_usuario_id: subUsuarioValidado,
+      tipo_envio: tipoEnvioValido,
+      direccion_envio_id: direccionValidada,
+      costo_envio_usd: envio,
+      agencia_envio: tipoEnvioValido === 'envio_nacional' ? agencia_envio : null,
+      creado_por_staff_id,
+    })
+    .select()
+    .single();
 
-    res.status(201).json({ ...orden, items: itemsConPrecio });
+  if (errorOrden) throw errorOrden;
+
+  const itemsParaInsertar = itemsConPrecio.map(item => ({
+    ...item,
+    orden_id: orden.id
+  }));
+
+  const { error: errorItems } = await supabase
+    .from('ordenes_items')
+    .insert(itemsParaInsertar);
+
+  if (errorItems) {
+    await supabase.from('ordenes').delete().eq('id', orden.id);
+    throw errorItems;
+  }
+
+  await supabase.from('ordenes_historial').insert({
+    orden_id: orden.id,
+    estado: 'pedido_creado'
+  });
+
+  const mensajeCreacion = forma_pago_final === 'credito'
+    ? `Tu orden #${orden.id} por $${total_usd} fue recibida. Te avisaremos si hay algún ajuste en las cantidades.`
+    : `Tu orden #${orden.id} por $${total_usd} fue recibida. Te avisaremos cuando esté lista para procesar el pago.`;
+
+  await crearNotificacion(
+    usuario_id,
+    'orden_creada',
+    'Orden creada',
+    mensajeCreacion,
+    orden.id
+  );
+
+  return { ...orden, items: itemsConPrecio };
+}
+
+function responderErrorOrden(err, res, mensajeLog) {
+  if (err instanceof ErrorOrden) {
+    return res.status(err.status).json({ error: err.message, ...(err.extra || {}) });
+  }
+  console.error(mensajeLog, err);
+  if (err.code === '23505') {
+    return res.status(409).json({ error: 'Conflicto de datos' });
+  }
+  if (err.code === '23503') {
+    return res.status(400).json({ error: 'Referencia inválida' });
+  }
+  res.status(500).json({ error: 'Error del servidor' });
+}
+
+// POST /orders
+export async function createOrden(req, res) {
+  const usuario_id = (req.user.es_admin && req.body.usuario_id)
+    ? req.body.usuario_id
+    : req.user.id;
+
+  try {
+    const orden = await construirOrden(usuario_id, req.body);
+    res.status(201).json(orden);
   } catch (err) {
-    console.error('Error al crear orden:', err);
-    
-    if (err.code === '23505') {
-      return res.status(409).json({ error: 'Conflicto de datos' });
-    }
-    if (err.code === '23503') {
-      return res.status(400).json({ error: 'Referencia inválida' });
-    }
-    
-    res.status(500).json({ error: 'Error del servidor' });
+    responderErrorOrden(err, res, 'Error al crear orden:');
   }
 }
 
