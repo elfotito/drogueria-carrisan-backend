@@ -31,8 +31,6 @@ export async function loginStaff(req, res) {
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
 
-    // Mismo patrón que el login de clientes: token_version embebido para
-    // poder revocar la sesión sin esperar a que expire el JWT.
     const token = jwt.sign(
       {
         id: staff.id,
@@ -116,6 +114,43 @@ export async function crearOrdenParaCliente(req, res) {
     console.error('Error al crear orden como vendedor:', err);
     if (err.code === '23505') return res.status(409).json({ error: 'Conflicto de datos' });
     if (err.code === '23503') return res.status(400).json({ error: 'Referencia inválida' });
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
+// POST /staff/admin-bridge — un staff con rol admin/administrador obtiene
+// un token de CLIENTE válido (mismo formato que /auth/login) para entrar
+// al panel /admin existente, sin tocar su lógica de autorización. Empareja
+// por email en vez de un FK: si tu cuenta staff usa el mismo correo que
+// tu cuenta users con es_admin=true, no hace falta ningún paso manual.
+export async function crearBridgeAdmin(req, res) {
+  try {
+    const { data: user, error: errorUser } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', req.staff.email)
+      .single();
+
+    if (errorUser || !user) {
+      return res.status(400).json({
+        error: 'No existe una cuenta de cliente con este mismo correo. Creá (o editá) una cuenta cliente con este email y marcala como administradora.'
+      });
+    }
+
+    if (!user.es_admin || !user.activo) {
+      return res.status(403).json({ error: 'La cuenta con este correo no tiene acceso administrativo' });
+    }
+
+    const token = jwt.sign(
+      { id: user.id, email: user.email, es_admin: user.es_admin, nombre: user.nombre, token_version: user.token_version ?? 0 },
+      process.env.JWT_SECRET,
+      { expiresIn: '3d' }
+    );
+
+    const { password_hash, ...userSinPassword } = user;
+    res.json({ token, user: userSinPassword });
+  } catch (err) {
+    console.error('Error en crearBridgeAdmin:', err);
     res.status(500).json({ error: 'Error del servidor' });
   }
 }
