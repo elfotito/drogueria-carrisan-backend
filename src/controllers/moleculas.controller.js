@@ -1,4 +1,6 @@
 import { supabase } from '../config/supabase.js';
+import { aplicarDescuentoAProducto } from './descuentos.controller.js';
+import { enriquecerConValoraciones } from './productos.controller.js';
 
 // =================================================================
 // ATC CLASIFICACIONES
@@ -525,6 +527,11 @@ export async function getProductoCompleto(req, res) {
       return res.status(404).json({ error: 'Producto no encontrado' });
     }
 
+    // Aplicar descuento activo + rating/valoraciones para que la página de
+    // detalle muestre el precio con oferta y las estrellas de reseñas.
+    const productoConDescuento = await aplicarDescuentoAProducto(producto);
+    const [productoFinal] = await enriquecerConValoraciones([productoConDescuento]);
+
     // Detalles: puede no existir todavía (producto sin ficha técnica cargada aún)
     const { data: detalles } = await supabase
       .from('producto_detalles')
@@ -540,7 +547,7 @@ export async function getProductoCompleto(req, res) {
     if (errorMoleculas) throw errorMoleculas;
 
     res.json({
-      producto,
+      producto: productoFinal,
       detalles: detalles || null,
       moleculas: moleculas || []
     });

@@ -3,7 +3,7 @@ import { aplicarDescuentosAProductos, aplicarDescuentoAProducto } from './descue
 
 // Enriquece una lista de productos con rating_promedio y rating_total
 // usando un único batch query a la tabla valoraciones.
-async function enriquecerConValoraciones(productos) {
+export async function enriquecerConValoraciones(productos) {
   if (!productos || productos.length === 0) return productos;
 
   const ids = productos.map((p) => p.id);
@@ -30,13 +30,20 @@ async function enriquecerConValoraciones(productos) {
 }
 
 // GET /products?search=&marca_id=&sort=&molecula=&linea=&laboratorio=&forma=&disponible=&precio_min=&precio_max=&page=&limit=
+// Sin `page` retorna un ARRAY plano (usado por Home, carruseles, buscadores, etc.)
+// Con `page` retorna { productos, total, hasMore, page } (usado por Catalogo).
 export async function getProductos(req, res) {
   const {
     search, marca_id, sort, molecula,
     linea, laboratorio, forma, disponible,
     precio_min, precio_max,
-    page = 1, limit = 24
+    page, limit
   } = req.query;
+
+  // La paginación se activa solo cuando el frontend pide una `page` explícita
+  // (ej. Catalogo). Quienes pasan solo `limit` (buscadores/autocomplete)
+  // quieren un array plano y ya recortan con `.slice()` en el frontend.
+  const usarPaginacion = page !== undefined;
 
   const opcionesOrden = {
     nombre_asc: { column: 'nombre_comercial', ascending: true },
@@ -62,7 +69,9 @@ export async function getProductos(req, res) {
 
       const moleculaIds = (moleculasMatch || []).map((m) => m.id);
       if (moleculaIds.length === 0) {
-        return res.json({ productos: [], total: 0, hasMore: false, page: pageNum });
+        return usarPaginacion
+          ? res.json({ productos: [], total: 0, hasMore: false, page: pageNum })
+          : res.json([]);
       }
 
       const { data: relaciones, error: errorRelaciones } = await supabase
@@ -73,13 +82,15 @@ export async function getProductos(req, res) {
 
       productoIdsPorMolecula = [...new Set((relaciones || []).map((r) => r.producto_id))];
       if (productoIdsPorMolecula.length === 0) {
-        return res.json({ productos: [], total: 0, hasMore: false, page: pageNum });
+        return usarPaginacion
+          ? res.json({ productos: [], total: 0, hasMore: false, page: pageNum })
+          : res.json([]);
       }
     }
 
     let query = supabase
       .from('productos')
-      .select('*, marcas(id, nombre)', { count: 'exact' })
+      .select('*, marcas(id, nombre)', usarPaginacion ? { count: 'exact' } : undefined)
       .eq('activo', true);
 
     if (search) query = query.ilike('nombre_comercial', `%${search}%`);
@@ -92,13 +103,24 @@ export async function getProductos(req, res) {
     if (precio_max) query = query.lte('precio_usd', precio_max);
     if (productoIdsPorMolecula) query = query.in('id', productoIdsPorMolecula);
 
-    const { data, error, count } = await query
-      .order(orden.column, { ascending: orden.ascending })
-      .range(from, to);
+    query = query.order(orden.column, { ascending: orden.ascending });
+
+    if (usarPaginacion) {
+      query = query.range(from, to);
+    }
+
+    const { data, error, count } = await query;
 
     if (error) throw error;
 
     const productosConDescuento = await aplicarDescuentosAProductos(data);
+    const productosConRating = usarPaginacion
+      ? productosConDescuento
+      : await enriquecerConValoraciones(productosConDescuento);
+
+    if (!usarPaginacion) {
+      return res.json(productosConRating);
+    }
 
     res.json({
       productos: productosConDescuento,
