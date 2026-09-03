@@ -29,144 +29,103 @@ async function enriquecerConValoraciones(productos) {
   });
 }
 
-// GET /products?search=&marca_id=&sort=&linea=&laboratorio=&forma=&disponible=&precio_min=&precio_max=
-//   → devuelve un ARRAY con todos los resultados (backward-compatible: así lo
-//     consumen Home, Carrito, Ofertas, resultados de búsqueda, admin, etc.)
-// GET /products?page=&limit=&... (iguales filtros)
-//   → devuelve UN OBJETO paginado { productos, total, page, limit, hasMore }
-//     para que el catálogo haga infinite scroll sin bajar todo.
+// GET /products?search=&marca_id=&sort=&molecula=&linea=&laboratorio=&forma=&disponible=&precio_min=&precio_max=&page=&limit=
 export async function getProductos(req, res) {
   const {
-    search,
-    marca_id,
-    sort,
-    page,
-    limit,
-    linea,
-    laboratorio,
-    forma,
-    disponible,
-    precio_min,
-    precio_max,
+    search, marca_id, sort, molecula,
+    linea, laboratorio, forma, disponible,
+    precio_min, precio_max,
+    page = 1, limit = 24
   } = req.query;
 
-  // Mapa de valores permitidos de "sort" -> columna real + dirección
-  // (whitelist explícita para no pasar strings arbitrarios directo a Supabase)
   const opcionesOrden = {
     nombre_asc: { column: 'nombre_comercial', ascending: true },
     nombre_desc: { column: 'nombre_comercial', ascending: false },
     precio_asc: { column: 'precio_usd', ascending: true },
     precio_desc: { column: 'precio_usd', ascending: false },
   };
-
   const orden = opcionesOrden[sort] || opcionesOrden.nombre_asc;
 
-  // ¿Paginación activa? Solo si llega "page" (los demás consumidores que no
-  // mandan page siguen recibiendo el array completo, como antes).
-  const paginaPide = page !== undefined && page !== '';
-  const paginaActual = Math.max(1, parseInt(page, 10) || 1);
-  const limite = Math.min(100, Math.max(1, parseInt(limit, 10) || 24));
-  const desde = (paginaActual - 1) * limite;
-  const hasta = desde + limite - 1;
+  const pageNum = Math.max(1, parseInt(page, 10) || 1);
+  const limitNum = Math.max(1, parseInt(limit, 10) || 24);
+  const from = (pageNum - 1) * limitNum;
+  const to = from + limitNum - 1;
 
   try {
+    // Filtro por principio activo (molécula normalizada). Se resuelve aparte
+    // porque depende de la RPC buscar_moleculas + la tabla puente producto_moleculas,
+    // antes de poder filtrar la tabla productos por id.
+    let productoIdsPorMolecula = null;
+    if (molecula) {
+      const { data: moleculasMatch, error: errorBuscar } = await supabase.rpc('buscar_moleculas', { termino: molecula });
+      if (errorBuscar) throw errorBuscar;
+
+      const moleculaIds = (moleculasMatch || []).map((m) => m.id);
+      if (moleculaIds.length === 0) {
+        return res.json({ productos: [], total: 0, hasMore: false, page: pageNum });
+      }
+
+      const { data: relaciones, error: errorRelaciones } = await supabase
+        .from('producto_moleculas')
+        .select('producto_id')
+        .in('molecula_id', moleculaIds);
+      if (errorRelaciones) throw errorRelaciones;
+
+      productoIdsPorMolecula = [...new Set((relaciones || []).map((r) => r.producto_id))];
+      if (productoIdsPorMolecula.length === 0) {
+        return res.json({ productos: [], total: 0, hasMore: false, page: pageNum });
+      }
+    }
+
     let query = supabase
       .from('productos')
       .select('*, marcas(id, nombre)', { count: 'exact' })
-      .eq('activo', true)
-      .eq('visible_catalogo', true);
+      .eq('activo', true);
 
-    if (search) {
-      query = query.ilike('nombre_comercial', `%${search}%`);
-    }
+    if (search) query = query.ilike('nombre_comercial', `%${search}%`);
+    if (marca_id) query = query.eq('marca_id', marca_id);
+    if (linea) query = query.eq('linea', linea);
+    if (laboratorio) query = query.in('laboratorio', laboratorio.split(','));
+    if (forma) query = query.in('forma', forma.split(','));
+    if (disponible === 'true') query = query.eq('disponible', true);
+    if (precio_min) query = query.gte('precio_usd', precio_min);
+    if (precio_max) query = query.lte('precio_usd', precio_max);
+    if (productoIdsPorMolecula) query = query.in('id', productoIdsPorMolecula);
 
-    if (marca_id) {
-      query = query.eq('marca_id', marca_id);
-    }
-
-    if (linea) {
-      query = query.eq('linea', linea);
-    }
-
-    // Multi-select por laboratorio/forma: vienen como "A,B,C"
-    if (laboratorio) {
-      query = query.in('laboratorio', laboratorio.split(','));
-    }
-
-    if (forma) {
-      query = query.in('forma', forma.split(','));
-    }
-
-    if (disponible === 'true') {
-      query = query.eq('disponible', true);
-    }
-
-    if (precio_min !== undefined && precio_min !== '') {
-      query = query.gte('precio_usd', Number(precio_min));
-    }
-
-    if (precio_max !== undefined && precio_max !== '') {
-      query = query.lte('precio_usd', Number(precio_max));
-    }
-
-    if (paginaPide) {
-      query = query.order(orden.column, { ascending: orden.ascending }).range(desde, hasta);
-    } else {
-      query = query.order(orden.column, { ascending: orden.ascending });
-    }
-
-    const { data, error, count } = await query;
+    const { data, error, count } = await query
+      .order(orden.column, { ascending: orden.ascending })
+      .range(from, to);
 
     if (error) throw error;
 
-    // Enriquece con descuentos (precio_final) y ratings
-    const productosConDescuento = await aplicarDescuentosAProductos(data || []);
-    const productosConRating = await enriquecerConValoraciones(productosConDescuento);
+    const productosConDescuento = await aplicarDescuentosAProductos(data);
 
-    // Modo array (backward-compatible) vs. modo paginado (catálogo con infinite scroll)
-    if (paginaPide) {
-      res.json({
-        productos: productosConRating,
-        total: count ?? productosConRating.length,
-        page: paginaActual,
-        limit: limite,
-        hasMore: count != null ? desde + productosConRating.length < count : productosConRating.length >= limite,
-      });
-    } else {
-      res.json(productosConRating);
-    }
+    res.json({
+      productos: productosConDescuento,
+      total: count ?? productosConDescuento.length,
+      hasMore: (count ?? 0) > to + 1,
+      page: pageNum,
+    });
   } catch (err) {
     console.error('Error al obtener productos:', err);
     res.status(500).json({ error: 'Error del servidor' });
   }
 }
 
-// GET /products/metadata
-// Devuelve las listas únicas de laboratorios y formas + el total del catálogo,
-// para llenar los filtros del sidebar sin tener que descargar todos los productos.
+// GET /products/metadata — valores distintos de laboratorio/forma para poblar filtros
 export async function getProductosMetadata(req, res) {
   try {
-    const base = () =>
-      supabase.from('productos').select('laboratorio, forma').eq('activo', true).eq('visible_catalogo', true);
+    const { data, error } = await supabase
+      .from('productos')
+      .select('laboratorio, forma')
+      .eq('activo', true);
 
-    const [resLab, resForma, resCount] = await Promise.all([
-      base().not('laboratorio', 'is', null),
-      base().not('forma', 'is', null),
-      supabase.from('productos').select('id', { count: 'exact', head: true }).eq('activo', true).eq('visible_catalogo', true),
-    ]);
+    if (error) throw error;
 
-    if (resLab.error || resForma.error || resCount.error) {
-      throw resLab.error || resForma.error || resCount.error;
-    }
+    const laboratorios = [...new Set((data || []).map((p) => p.laboratorio).filter(Boolean))].sort();
+    const formas = [...new Set((data || []).map((p) => p.forma).filter(Boolean))].sort();
 
-    const laboratorios = Array.from(new Set((resLab.data || []).map((p) => p.laboratorio).filter(Boolean))).sort();
-    const formas = Array.from(new Set((resForma.data || []).map((p) => p.forma).filter(Boolean))).sort();
-
-    res.json({
-      laboratorios,
-      formas,
-      totalCatalogo: resCount.count ?? 0,
-    });
+    res.json({ laboratorios, formas });
   } catch (err) {
     console.error('Error al obtener metadata de productos:', err);
     res.status(500).json({ error: 'Error del servidor' });
