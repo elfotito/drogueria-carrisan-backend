@@ -26,12 +26,12 @@ npm run start    # Produccion (node src/server.js)
 src/
 ├── server.js                  # ENTRY POINT — Express app + rutas + middleware
 ├── config/supabase.js         # Cliente Supabase (createClient con env vars)
-├── controllers/               # Logica de negocio (31 archivos)
+├── controllers/               # Logica de negocio (33 archivos)
 ├── routes/                    # Definicion de endpoints (30 archivos)
 ├── middleware/                 # auth.js, Ratelimit.js, soloAdmin.middleware.js
 ├── services/                  # push.service.js (web-push)
 ├── jobs/                      # Tareas cron (limpiezaNotificaciones, revisarVencimientos)
-├── migrations/                # SQL de migraciones (5 archivos)
+├── migrations/                # SQL de migraciones (6 archivos)
 └── utils/                     # turnstile.js (verificacion anti-bot)
 ```
 
@@ -49,12 +49,11 @@ const { data, error } = await supabase
 
 Si necesitas entender la schema de la DB, mira los controllers (los nombres de columnas aparecen en las queries) o las migraciones SQL.
 
-### Rutas registradas en server.js (17 de 30)
+### Rutas registradas en server.js (30 de 30)
 
-Solo estas rutas estan activas:
-`/auth`, `/marcas`, `/products`, `/prices`, `/orders`, `/users`, `/descuentos`, `/facturas`, `/pagos`, `/reportes-pago`, `/clientes`, `/notifications`, `/lists`, `/direcciones`, `/favoritos`, `/uploads`, `/moleculas`
+Todos los archivos de `routes/` estan importados y montados en `server.js`: `/auth`, `/marcas`, `/products`, `/prices`, `/orders`, `/users`, `/admin/codigos-invitacion`, `/descuentos`, `/facturas`, `/pagos`, `/reportes-pago`, `/clientes`, `/notifications`, `/lists`, `/direcciones`, `/favoritos`, `/uploads`, `/moleculas`, `/staff`, `/delivery-tarifas`, `/requerimientos`, `/cotizaciones`, `/documentos`, `/chat`, `/presupuestos`, `/subusuarios`, `/admin/analytics`, `/push`, `/promociones`, y `/products` (valoraciones, junto al router de productos).
 
-Hay ~13 archivos de rutas que NO estan conectados en server.js (analytics, chat, cotizaciones, documentos, images, imagesUpload, presupuestos, promociones, push, requerimientos, subusuarios, tarifasDelivery, valoraciones). Algunos pueden estar parcialmente implementados.
+Si agregas un endpoint nuevo, recuerda importar y montar el archivo de rutas en `server.js`.
 
 ### Autenticacion JWT
 
@@ -105,7 +104,7 @@ Hay ~13 archivos de rutas que NO estan conectados en server.js (analytics, chat,
 
 ## Migraciones SQL
 
-Ubicacion: `src/migrations/` (5 archivos)
+Ubicacion: `src/migrations/` (6 archivos)
 
 Las migraciones son SQL plano. NO hay sistema de migraciones automatico — se ejecutan manualmente en Supabase SQL Editor.
 
@@ -116,6 +115,7 @@ Las migraciones son SQL plano. NO hay sistema de migraciones automatico — se e
 | 004_fix_notificacion_preferencias.sql | Correccion: usuario_id INTEGER en vez de UUID |
 | 005_tarifas_delivery.sql | Tabla de costos de delivery por ciudad |
 | 006_reinicio_clave.sql | Campo reinicio_clave en users |
+| 007_codigos_invitacion_schema.sql | Columnas de expiracion y creacion en codigos_invitacion |
 
 **IMPORTANTE**: La tabla principal `users` NO esta en estas migraciones — fue creada directamente en Supabase. Si necesitas ver su schema, busca las queries en los controllers (especialmente auth.controller.js y users.controller.js).
 
