@@ -74,6 +74,57 @@ export async function getColaDespacho(req, res) {
   }
 }
 
+// GET /staff/clientes?buscar=texto — búsqueda de clientes para que el
+// vendedor elija a nombre de quién crea el pedido. Devuelve solo lo
+// necesario para elegir (no todo el perfil del cliente).
+export async function buscarClientes(req, res) {
+  const { buscar } = req.query;
+
+  if (!buscar || buscar.trim().length < 2) {
+    return res.json([]);
+  }
+
+  try {
+    const texto = buscar.trim();
+    const { data, error } = await supabase
+      .from('users')
+      .select('id, nombre, email, telefono, rif_cedula, activo')
+      .or(`nombre.ilike.%${texto}%,email.ilike.%${texto}%,rif_cedula.ilike.%${texto}%`)
+      .eq('activo', true)
+      .limit(20);
+
+    if (error) throw error;
+
+    res.json(data || []);
+  } catch (err) {
+    console.error('Error al buscar clientes:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
+// GET /staff/clientes/:id/direcciones — direcciones activas de un cliente
+// puntual (getDirecciones normal solo devuelve las del usuario logueado,
+// acá el vendedor necesita las de OTRO usuario).
+export async function getDireccionesDeCliente(req, res) {
+  const { id } = req.params;
+
+  try {
+    const { data, error } = await supabase
+      .from('direcciones_envio')
+      .select('*')
+      .eq('usuario_id', id)
+      .eq('activo', true)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    res.json(data || []);
+  } catch (err) {
+    console.error('Error al obtener direcciones del cliente:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
 // POST /staff/ordenes — un vendedor crea un pedido a nombre de un cliente
 // ya registrado. Reutiliza construirOrden (misma validación de crédito,
 // stock y envío que el checkout normal) pero saltando el chequeo de

@@ -28,7 +28,7 @@ src/
 ├── config/supabase.js         # Cliente Supabase (createClient con env vars)
 ├── controllers/               # Logica de negocio (33 archivos)
 ├── routes/                    # Definicion de endpoints (30 archivos)
-├── middleware/                 # auth.js, Ratelimit.js, soloAdmin.middleware.js
+├── middleware/                 # auth.js, Ratelimit.js, soloAdmin.middleware.js, staffAuth.js (JWT staff interno)
 ├── services/                  # push.service.js (web-push)
 ├── jobs/                      # Tareas cron (limpiezaNotificaciones, revisarVencimientos)
 ├── migrations/                # SQL de migraciones (6 archivos)
@@ -66,6 +66,24 @@ Si agregas un endpoint nuevo, recuerda importar y montar el archivo de rutas en 
 4. Si la version no coincide → 401 "Sesion revocada"
 5. Para logout, se incrementa `token_version` en la DB → todos los tokens anteriores quedan invalidos
 
+### Autenticacion de personal interno (staff)
+
+Login aparte para trabajadores de la empresa (vendedores, despachadores, administradores), separado del login de clientes (`/auth`).
+
+- Rutas bajo `/staff`, archivos: `routes/staff.routes.js`, `controllers/staff.controller.js`, `middleware/staffAuth.js`.
+- Tabla propia `staff` (no `users`), con `rol` en (`vendedor`, `despachador`, `administrador`, `admin`) y su propio `token_version` (ver migracion `008_staff.sql`).
+- El JWT de staff lleva `tipo: 'staff'` + `rol`; el de cliente lleva `es_admin`. `verifyStaffJWT` rechaza cualquier token sin `tipo === 'staff'` aunque compartan `JWT_SECRET` — un token de cliente nunca pasa por rutas de staff.
+- Middlewares: `verifyStaffJWT` (valida token e `token_version`) y `checkRolStaff([...])` (RBAC por rol).
+- Endpoints:
+  - `POST /staff/login` — login interno (bcrypt + JWT 3d).
+  - `GET /staff/despacho` — cola de ordenes en estado `enviado` (solo despachador/admin).
+  - `PATCH /staff/despacho/:id/entregar` → `enviado → entregado` via `aplicarCambioEstado`/`validarTransicion`.
+  - `POST /staff/ordenes` — vendedor crea pedido a nombre de un cliente ya registrado, usando `construirOrden` con `creado_por_staff_id` para trazabilidad.
+  - `POST /staff/admin-bridge` — staff admin recibe un JWT de CLIENTE valido (mismo formato que `/auth/login`) para entrar al panel `/admin`. Empareja por email: la cuenta `users` con ese correo debe existir y tener `es_admin=true`.
+- Frontend: `src/pages/staff/` (StaffLogin, StaffDashboard, StaffDespacho, StaffOrdenes), `src/context/StaffAuthContext.jsx`, `src/api/staffAxios.js` (token propio `staff_token`, sesion independiente de la de cliente), `src/components/PrivateRouteStaff.jsx`.
+
+**Importante**: la tabla `staff` y la columna `ordenes.creado_por_staff_id` NO existen en una BD sin ejecutar la migracion `008_staff.sql`.
+
 ### Rate Limiting (5 limiters)
 
 | Limiter | Ventana | Max requests | Donde se usa |
@@ -101,10 +119,11 @@ Si agregas un endpoint nuevo, recuerda importar y montar el archivo de rutas en 
 | requerimientos.controller.js | Requerimientos/requerimientos de compra |
 | documentos.controller.js | Documentos adjuntos |
 | chat.controller.js | Mensajes de chat cliente-empresa |
+| staff.controller.js | Login interno (staff), cola de despacho, crear orden a cliente, bridge al admin |
 
 ## Migraciones SQL
 
-Ubicacion: `src/migrations/` (6 archivos)
+Ubicacion: `src/migrations/` (7 archivos)
 
 Las migraciones son SQL plano. NO hay sistema de migraciones automatico — se ejecutan manualmente en Supabase SQL Editor.
 
@@ -116,6 +135,7 @@ Las migraciones son SQL plano. NO hay sistema de migraciones automatico — se e
 | 005_tarifas_delivery.sql | Tabla de costos de delivery por ciudad |
 | 006_reinicio_clave.sql | Campo reinicio_clave en users |
 | 007_codigos_invitacion_schema.sql | Columnas de expiracion y creacion en codigos_invitacion |
+| 008_staff.sql | Tabla `staff` (login interno) + columna `ordenes.creado_por_staff_id` |
 
 **IMPORTANTE**: La tabla principal `users` NO esta en estas migraciones — fue creada directamente en Supabase. Si necesitas ver su schema, busca las queries en los controllers (especialmente auth.controller.js y users.controller.js).
 
