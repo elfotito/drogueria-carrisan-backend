@@ -85,8 +85,12 @@ export async function login(req, res) {
 // expirado, sin consumirlo todavía (se consume recién al completar el
 // registro exitosamente, ver más abajo). Público, sin verifyJWT — el
 // usuario todavía no tiene cuenta.
+// Acepta un `tipo` opcional ('honorifico' | 'staff'). Si se envía, el
+// código debe ser de ese tipo; si no se envía, se acepta solo un código
+// honorífico (compatibilidad con el flujo honorífico existente). Para
+// códigos staff devuelve también `rol_staff` (el rol asignado).
 export async function verificarCodigo(req, res) {
-  const { codigo } = req.body;
+  const { codigo, tipo } = req.body;
 
   if (!codigo) {
     return res.status(400).json({ error: 'Código es requerido' });
@@ -97,12 +101,23 @@ export async function verificarCodigo(req, res) {
 
     const { data: registro, error } = await supabase
       .from('codigos_invitacion')
-      .select('id, usado, expira_en')
+      .select('id, usado, expira_en, tipo, rol_staff')
       .eq('codigo', codigoNormalizado)
       .single();
 
     if (error || !registro) {
       return res.status(404).json({ valido: false, error: 'Código no encontrado' });
+    }
+
+    // Un código staff solo se puede usar pidiendo tipo='staff' explícito.
+    // Si no se manda tipo (flujo honorífico) o se pide honorífico y el
+    // código es de staff, se rechaza.
+    const esStaff = registro.tipo === 'staff';
+    if (tipo === 'staff' && !esStaff) {
+      return res.status(400).json({ valido: false, error: 'Este código no es válido para el registro de personal' });
+    }
+    if (esStaff && tipo !== 'staff') {
+      return res.status(400).json({ valido: false, error: 'Este código es exclusivo para el registro de personal' });
     }
 
     if (registro.usado) {
@@ -115,7 +130,11 @@ export async function verificarCodigo(req, res) {
       return res.status(410).json({ valido: false, error: 'Ese código expiró' });
     }
 
-    res.json({ valido: true });
+    res.json({
+      valido: true,
+      tipo: registro.tipo,
+      rol_staff: esStaff ? registro.rol_staff : null,
+    });
   } catch (err) {
     console.error('Error en verificarCodigo:', err);
     res.status(500).json({ error: 'Error del servidor' });
@@ -189,7 +208,9 @@ export async function register(req, res) {
     }
 
     // 2. Si es honorífico, validar el código de invitación ANTES de crear
-    // nada — evita crear usuario si el código ya no sirve.
+    // nada — evita crear usuario si el código ya no sirve. Se marca como
+    // usado de forma atómica (UPDATE ... WHERE usado=false) para evitar que
+    // dos registros concurrentes consuman el mismo código.
     let codigoRegistro = null;
     if (tipo_usuario === 'honorifico') {
       const codigo = (perfil.codigo_invitacion || '').trim().toUpperCase();
@@ -199,12 +220,16 @@ export async function register(req, res) {
 
       const { data: codigoData, error: codigoError } = await supabase
         .from('codigos_invitacion')
-        .select('id, usado, expira_en')
+        .select('id, usado, expira_en, tipo, rol_staff')
         .eq('codigo', codigo)
         .single();
 
       if (codigoError || !codigoData) {
         return res.status(404).json({ error: 'Código de invitación no válido' });
+      }
+      // Un código de staff no puede registrarse en la rama honorífica.
+      if (codigoData.tipo === 'staff') {
+        return res.status(400).json({ error: 'Este código es exclusivo para el registro de personal' });
       }
       if (codigoData.usado) {
         return res.status(409).json({ error: 'Ese código de invitación ya fue utilizado' });
@@ -213,6 +238,23 @@ export async function register(req, res) {
         await supabase.from('codigos_invitacion').delete().eq('id', codigoData.id);
         return res.status(410).json({ error: 'Ese código de invitación expiró' });
       }
+
+      // Consumir el código de forma atómica: solo se actualiza si sigue
+      // sin usar. Si otra petición lo consumió en paralelo, no se devuelve
+      // ninguna fila y rechazamos aquí.
+      const { data: consumido, error: consumoError } = await supabase
+        .from('codigos_invitacion')
+        .update({ usado: true })
+        .eq('id', codigoData.id)
+        .eq('usado', false)
+        .select('id')
+        .maybeSingle();
+
+      if (consumoError) throw consumoError;
+      if (!consumido) {
+        return res.status(409).json({ error: 'Ese código de invitación ya fue utilizado' });
+      }
+
       codigoRegistro = codigoData;
     }
 
@@ -302,13 +344,13 @@ export async function register(req, res) {
       return res.status(500).json({ error: 'No se pudo completar el registro. Intentá de nuevo.' });
     }
 
-    // 7. Si es honorífico, marcar el código como usado y linkearlo al
-    // usuario recién creado.
+    // 7. Si es honorífico, linkear el código ya consumido al usuario
+    // recién creado. El código ya se marcó como usado de forma atómica en
+    // el paso 2 (para evitar race conditions); aquí solo asociamos al usuario.
     if (tipo_usuario === 'honorifico' && codigoRegistro) {
       await supabase
         .from('codigos_invitacion')
         .update({
-          usado: true,
           user_id: nuevoUsuario.id,
           fecha_uso: new Date().toISOString()
         })

@@ -1,18 +1,22 @@
 import { Router } from 'express';
 import {
-  getColaAlmacen,
-  marcarPreparando,
+  getColaRevisar,
+  getColaPreparar,
+  aprobarOrden,
+  cancelarOrden,
   marcarEnviado,
 } from '../controllers/almacen.controller.js';
 import { verifyStaffJWT, checkRolStaff } from '../middleware/staffAuth.js';
 
 const router = Router();
 
-// Almacenista maneja la preparación: despachador/admin/director también pueden.
+// Almacenista maneja la revisión y preparación: administrador/director/admin también pueden.
 const ROLES_ALMACEN = ['almacenista', 'administrador', 'director', 'admin'];
 
-router.get('/', verifyStaffJWT, checkRolStaff(ROLES_ALMACEN), getColaAlmacen);
-router.patch('/:id/preparando', verifyStaffJWT, checkRolStaff(ROLES_ALMACEN), marcarPreparando);
+router.get('/revisar', verifyStaffJWT, checkRolStaff(ROLES_ALMACEN), getColaRevisar);
+router.get('/preparar', verifyStaffJWT, checkRolStaff(ROLES_ALMACEN), getColaPreparar);
+router.patch('/:id/aprobar', verifyStaffJWT, checkRolStaff(ROLES_ALMACEN), aprobarOrden);
+router.patch('/:id/cancelar', verifyStaffJWT, checkRolStaff(ROLES_ALMACEN), cancelarOrden);
 router.patch('/:id/enviado', verifyStaffJWT, checkRolStaff(ROLES_ALMACEN), marcarEnviado);
 
 export default router;

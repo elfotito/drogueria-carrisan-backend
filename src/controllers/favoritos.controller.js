@@ -11,28 +11,25 @@ export async function obtenerFavoritos(req, res) {
       .select(`
         id,
         created_at,
-        productos (
-          id,
-          nombre_comercial,
-          precio_usd,
-          foto_url,
-          disponible,
-          laboratorio,
-          marca_id,
-          marcas (nombre)
-        )
+        productos (*, marcas (nombre))
       `)
       .eq('usuario_id', usuario_id)
       .order('created_at', { ascending: false });
 
-    if (error) throw error;
+    if (error) {
+      console.error('Supabase error al obtener favoritos:', JSON.stringify(error));
+      throw error;
+    }
 
-    // Transformar para que sea más fácil de usar en el frontend
-    const favoritos = data.map(fav => ({
-      ...fav.productos,
-      favorito_id: fav.id,
-      favorito_creado: fav.created_at
-    }));
+    // Transformar para que sea más fácil de usar en el frontend.
+    // Filtra favoritos cuyo producto ya no exista (producto eliminado).
+    const favoritos = data
+      .filter(fav => fav.productos !== null)
+      .map(fav => ({
+        ...fav.productos,
+        favorito_id: fav.id,
+        favorito_creado: fav.created_at
+      }));
 
     res.json({ favoritos });
   } catch (err) {

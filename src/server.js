@@ -84,6 +84,7 @@ app.use('/favoritos', favoritosRoutes);
 app.use('/uploads', uploadsRoutes);
 app.use('/moleculas', moleculasRoutes);
 app.use('/staff/login', authLimiter);
+app.use('/staff/registro', authLimiter);
 app.use('/staff/almacen', staffAlmacenRoutes);
 app.use('/staff/contabilidad', staffContabilidadRoutes);
 app.use('/staff', staffRoutes);

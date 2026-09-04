@@ -1,5 +1,6 @@
 import { supabase } from '../config/supabase.js';
 import { crearNotificacion } from './notificaciones.controller.js';
+import { validarTransicion, aplicarCambioEstado } from './ordenes.controller.js';
 
 // =====================================================================
 // Módulo de contabilidad (staff). Duplica la lógica contable que
@@ -760,6 +761,62 @@ export async function rechazarReportePago(req, res) {
     res.json(reporteActualizado);
   } catch (err) {
     console.error('Error al rechazar reporte de pago (contabilidad):', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
+// ---------------------------------------------------------------
+// CUENTAS POR COBRAR (tab "Por cobrar")
+// ---------------------------------------------------------------
+
+// GET /staff/contabilidad/ordenes-procesando — órdenes contado en
+// 'procesando' que esperan el reporte de pago del cliente ('esperando')
+// o están a la espera de verificación ('reportado'). Desde aquí
+// contabilidad puede cancelarlas.
+export async function getOrdenesProcesando(req, res) {
+  try {
+    const { data, error } = await supabase
+      .from('ordenes')
+      .select('*, users(id, nombre, email, telefono), ordenes_items(*, productos(nombre_comercial))')
+      .eq('forma_pago', 'contado')
+      .eq('estado', 'procesando')
+      .in('estado_pago', ['esperando', 'reportado'])
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) {
+    console.error('Error al obtener órdenes por cobrar (contabilidad):', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
+// PATCH /staff/contabilidad/ordenes/:id/cancelar — cancela una orden en
+// 'procesando' (esperando o con pago reportado aún sin verificar).
+export async function cancelarOrdenProcesando(req, res) {
+  const { id } = req.params;
+
+  try {
+    const { data: orden, error } = await supabase
+      .from('ordenes')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error || !orden) {
+      return res.status(404).json({ error: 'Orden no encontrada' });
+    }
+    if (orden.estado !== 'procesando') {
+      return res.status(400).json({ error: `Solo se puede cancelar una orden en procesando (estado actual: ${orden.estado})` });
+    }
+    if (!validarTransicion(orden.estado, 'cancelado')) {
+      return res.status(400).json({ error: 'No se puede cancelar esta orden' });
+    }
+
+    const data = await aplicarCambioEstado(orden, 'cancelado');
+    res.json(data);
+  } catch (err) {
+    console.error('Error al cancelar orden (contabilidad):', err);
     res.status(500).json({ error: 'Error del servidor' });
   }
 }

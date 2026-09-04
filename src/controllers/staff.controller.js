@@ -1,6 +1,7 @@
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { supabase } from '../config/supabase.js';
+import { verificarTurnstile } from '../utils/turnstile.js';
 import { validarTransicion, aplicarCambioEstado, construirOrden, ErrorOrden } from './ordenes.controller.js';
 
 // POST /staff/login
@@ -48,6 +49,130 @@ export async function loginStaff(req, res) {
     res.json({ token, staff: staffSinHash });
   } catch (err) {
     console.error('Error en loginStaff:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
+// POST /staff/registro — registro de personal interno mediante código de
+// invitación de tipo 'staff' (generado en /admin/codigos-invitacion con su
+// rol incrustado). Inserta en la tabla `staff` (no users), consume el
+// código de forma atómica y devuelve token + staff (auto-login).
+export async function registrarStaff(req, res) {
+  const { email, password, nombre, codigo, turnstileToken } = req.body;
+
+  if (!email || !password || !nombre || !codigo) {
+    return res.status(400).json({ error: 'Faltan datos requeridos' });
+  }
+
+  // Misma política que /auth/register: mínimo 8 caracteres + 1 letra + 1 número.
+  const tieneLetra = /[a-zA-Z]/.test(password);
+  const tieneNumero = /\d/.test(password);
+  if (password.length < 8 || !tieneLetra || !tieneNumero) {
+    return res.status(400).json({
+      error: 'La contraseña debe tener al menos 8 caracteres, incluyendo letras y números'
+    });
+  }
+
+  const verificacionBot = await verificarTurnstile(turnstileToken, req.ip);
+  if (!verificacionBot.valido) {
+    return res.status(400).json({ error: verificacionBot.error });
+  }
+
+  try {
+    const emailNormalizado = email.trim().toLowerCase();
+    const codigoNormalizado = codigo.trim().toUpperCase();
+
+    // 1. Buscar el código: debe existir, ser tipo 'staff' y llevar rol.
+    const { data: codigoData, error: codigoError } = await supabase
+      .from('codigos_invitacion')
+      .select('id, usado, expira_en, tipo, rol_staff')
+      .eq('codigo', codigoNormalizado)
+      .single();
+
+    if (codigoError || !codigoData || codigoData.tipo !== 'staff' || !codigoData.rol_staff) {
+      return res.status(404).json({ error: 'Código de invitación no válido' });
+    }
+    if (codigoData.usado) {
+      return res.status(409).json({ error: 'Ese código de invitación ya fue utilizado' });
+    }
+    if (codigoData.expira_en && new Date(codigoData.expira_en) < new Date()) {
+      await supabase.from('codigos_invitacion').delete().eq('id', codigoData.id);
+      return res.status(410).json({ error: 'Ese código de invitación expiró' });
+    }
+
+    // 2. El email no debe existir ya en la tabla staff.
+    const { data: existente } = await supabase
+      .from('staff')
+      .select('id')
+      .eq('email', emailNormalizado)
+      .single();
+
+    if (existente) {
+      return res.status(409).json({ error: 'Ese email ya está registrado' });
+    }
+
+    // 3. Consumir el código de forma atómica (UPDATE ... WHERE usado=false)
+    // para evitar que dos registros concurrentes lo usen.
+    const { data: consumido, error: consumoError } = await supabase
+      .from('codigos_invitacion')
+      .update({ usado: true })
+      .eq('id', codigoData.id)
+      .eq('usado', false)
+      .select('id')
+      .maybeSingle();
+
+    if (consumoError) throw consumoError;
+    if (!consumido) {
+      return res.status(409).json({ error: 'Ese código de invitación ya fue utilizado' });
+    }
+
+    // 4. Crear el staff. El rol sale del código (lo fijó el admin), nunca
+    // del body — impediría auto-asignarse un rol elevado.
+    const password_hash = await bcrypt.hash(password, 10);
+    const { data: nuevoStaff, error: errorStaff } = await supabase
+      .from('staff')
+      .insert({
+        email: emailNormalizado,
+        nombre: nombre.trim(),
+        password_hash,
+        rol: codigoData.rol_staff,
+        activo: true,
+        token_version: 0
+      })
+      .select()
+      .single();
+
+    if (errorStaff) {
+      // Si el insert falla, revertir el consumo del código para no quemarlo.
+      await supabase.from('codigos_invitacion').update({ usado: false }).eq('id', codigoData.id);
+      throw errorStaff;
+    }
+
+    // 5. Asociar el código consumido al staff creado.
+    await supabase
+      .from('codigos_invitacion')
+      .update({ fecha_uso: new Date().toISOString() })
+      .eq('id', codigoData.id);
+
+    // 6. Auto-login: mismo JWT que loginStaff.
+    const token = jwt.sign(
+      {
+        id: nuevoStaff.id,
+        email: nuevoStaff.email,
+        nombre: nuevoStaff.nombre,
+        rol: nuevoStaff.rol,
+        tipo: 'staff',
+        token_version: nuevoStaff.token_version ?? 0
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '3d' }
+    );
+
+    const { password_hash: _ph, ...staffSinHash } = nuevoStaff;
+    res.status(201).json({ token, staff: staffSinHash });
+  } catch (err) {
+    console.error('Error en registrarStaff:', err);
+    if (err.code === '23505') return res.status(409).json({ error: 'Ese email ya está registrado' });
     res.status(500).json({ error: 'Error del servidor' });
   }
 }

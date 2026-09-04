@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { loginStaff, getColaDespacho, marcarEntregado, crearOrdenParaCliente, crearBridgeAdmin, buscarClientes, getDireccionesDeCliente } from '../controllers/staff.controller.js';
+import { loginStaff, registrarStaff, getColaDespacho, marcarEntregado, crearOrdenParaCliente, crearBridgeAdmin, buscarClientes, getDireccionesDeCliente } from '../controllers/staff.controller.js';
 import { verifyStaffJWT, checkRolStaff } from '../middleware/staffAuth.js';
 
 const router = Router();
@@ -8,6 +8,7 @@ const ROLES_DESPACHO = ['despachador', 'administrador', 'director', 'admin'];
 const ROLES_VENTAS = ['vendedor', 'administrador', 'director', 'admin'];
 const ROLES_ADMIN = ['administrador', 'director', 'admin'];
 
+router.post('/registro', registrarStaff);
 router.post('/login', loginStaff);
 router.get('/despacho', verifyStaffJWT, checkRolStaff(ROLES_DESPACHO), getColaDespacho);
 router.patch('/despacho/:id/entregar', verifyStaffJWT, checkRolStaff(ROLES_DESPACHO), marcarEntregado);

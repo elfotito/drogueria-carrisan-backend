@@ -367,6 +367,25 @@ export async function aplicarCambioEstado(orden, estado) {
   return data;
 }
 
+// Aplica la bifurcación de forma de pago al entrar a 'procesando':
+// - credito: no espera pago, se encadena directo a 'preparando'
+//   (aplicarCambioEstado calcula fecha_vencimiento).
+// - contado: se abre la ventana de pago (estado_pago = 'esperando').
+// Compartido por updateEstadoOrden (admin) y aprobarOrden (almacenista).
+export async function bifurcarProcesando(orden) {
+  if (orden.forma_pago === 'credito') {
+    return aplicarCambioEstado(orden, 'preparando');
+  }
+  const { data, error } = await supabase
+    .from('ordenes')
+    .update({ estado_pago: 'esperando' })
+    .eq('id', orden.id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 // GET /orders/pendientes-pago — órdenes del usuario en 'procesando' a
 // contado que están esperando o fueron rechazadas (para la pantalla de
 // gestión de pagos, individual o multi-orden). Excluye las que ya están
@@ -516,24 +535,13 @@ export async function updateEstadoOrden(req, res) {
     let data = await aplicarCambioEstado(ordenActual, estado);
 
     // ---------------------------------------------------------------
-    // Bifurcación crédito/contado al entrar a 'procesando':
+    // Bifurcación crédito/contado al entrar a 'procesando' (ver helper
+    // bifurcarProcesando arriba):
     // - credito: no espera pago, se encadena directo a 'preparando'.
     // - contado: se abre la ventana de pago (estado_pago = 'esperando').
     // ---------------------------------------------------------------
     if (estado === 'procesando') {
-      if (data.forma_pago === 'credito') {
-        data = await aplicarCambioEstado(data, 'preparando');
-      } else {
-        const { data: actualizada, error: errorPago } = await supabase
-          .from('ordenes')
-          .update({ estado_pago: 'esperando' })
-          .eq('id', data.id)
-          .select()
-          .single();
-
-        if (errorPago) throw errorPago;
-        data = actualizada;
-      }
+      data = await bifurcarProcesando(data);
     }
 
     res.json(data);

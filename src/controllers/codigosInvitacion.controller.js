@@ -1,23 +1,40 @@
+import crypto from 'crypto';
 import { supabase } from '../config/supabase.js';
 
 const HORAS_VALIDEZ = 48;
+const MAX_ATTEMPTS = 100;
 
 // Genera un código alfanumérico de 6 caracteres. Excluye caracteres
 // ambiguos (I, O, 0, 1) para facilitar su escritura/lectura.
+// Usa crypto.randomBytes (criptográficamente seguro) en lugar de Math.random.
 function generarCodigoAlfanumerico() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes = crypto.randomBytes(6);
   let codigo = '';
   for (let i = 0; i < 6; i++) {
-    codigo += chars[Math.floor(Math.random() * chars.length)];
+    codigo += chars[bytes[i] % chars.length];
   }
   return codigo;
 }
 
+const TIPOS_VALIDOS = ['honorifico', 'staff'];
+const ROLES_STAFF_VALIDOS = ['vendedor', 'despachador', 'almacenista', 'contabilidad', 'administrador', 'director', 'admin'];
+
 // POST /admin/codigos-invitacion
 // Genera uno o varios códigos de invitación con expiración de 48h.
+// tipo puede ser 'honorifico' (default) o 'staff'. Si es 'staff', se exige
+// rol_staff (el rol con el que se registra la persona al usar el código).
 export async function generarCodigo(req, res) {
-  const { cantidad = 1 } = req.body;
+  const { cantidad = 1, tipo = 'honorifico', rol_staff } = req.body;
   const n = Math.min(Math.max(parseInt(cantidad, 10) || 1, 1), 20);
+
+  if (!TIPOS_VALIDOS.includes(tipo)) {
+    return res.status(400).json({ error: 'Tipo de código inválido' });
+  }
+
+  if (tipo === 'staff' && !ROLES_STAFF_VALIDOS.includes(rol_staff)) {
+    return res.status(400).json({ error: 'Debes indicar un rol válido para el código de staff' });
+  }
 
   try {
     const generados = [];
@@ -25,10 +42,12 @@ export async function generarCodigo(req, res) {
     const expiraEn = new Date(ahora.getTime() + HORAS_VALIDEZ * 60 * 60 * 1000).toISOString();
 
     for (let i = 0; i < n; i++) {
-      // Generar un código único que no exista ya en la DB
+      // Generar un código único que no exista ya en la DB.
+      // Se limita el número de intentos para evitar un loop infinito.
       let codigo = generarCodigoAlfanumerico();
+      let intentos = 0;
       let existe = true;
-      while (existe) {
+      while (existe && intentos < MAX_ATTEMPTS) {
         const { data } = await supabase
           .from('codigos_invitacion')
           .select('id')
@@ -36,9 +55,13 @@ export async function generarCodigo(req, res) {
           .maybeSingle();
         if (data) {
           codigo = generarCodigoAlfanumerico();
+          intentos++;
         } else {
           existe = false;
         }
+      }
+      if (existe) {
+        return res.status(500).json({ error: 'No se pudo generar un código único, inténtalo de nuevo' });
       }
 
       const { data: nuevo, error } = await supabase
@@ -48,6 +71,8 @@ export async function generarCodigo(req, res) {
           usado: false,
           fecha_creacion: ahora.toISOString(),
           expira_en: expiraEn,
+          tipo,
+          rol_staff: tipo === 'staff' ? rol_staff : null,
         })
         .select()
         .single();
@@ -83,6 +108,8 @@ export async function listarCodigos(req, res) {
         id,
         codigo,
         usado,
+        tipo,
+        rol_staff,
         fecha_creacion,
         expira_en,
         fecha_uso,

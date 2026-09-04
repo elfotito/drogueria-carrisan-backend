@@ -14,6 +14,8 @@ import {
   getReportesPago,
   verificarReportePago,
   rechazarReportePago,
+  getOrdenesProcesando,
+  cancelarOrdenProcesando,
 } from '../controllers/contabilidad.controller.js';
 import { verifyStaffJWT, checkRolStaff } from '../middleware/staffAuth.js';
 
@@ -42,5 +44,9 @@ router.delete('/facturas/:id', verifyStaffJWT, checkRolStaff(ROLES_CONTABILIDAD)
 router.get('/reportes-pago', verifyStaffJWT, checkRolStaff(ROLES_CONTABILIDAD), getReportesPago);
 router.patch('/reportes-pago/:id/verificar', verifyStaffJWT, checkRolStaff(ROLES_CONTABILIDAD), verificarReportePago);
 router.patch('/reportes-pago/:id/rechazar', verifyStaffJWT, checkRolStaff(ROLES_CONTABILIDAD), rechazarReportePago);
+
+// Cuentas por cobrar
+router.get('/ordenes-procesando', verifyStaffJWT, checkRolStaff(ROLES_CONTABILIDAD), getOrdenesProcesando);
+router.patch('/ordenes/:id/cancelar', verifyStaffJWT, checkRolStaff(ROLES_CONTABILIDAD), cancelarOrdenProcesando);
 
 export default router;
