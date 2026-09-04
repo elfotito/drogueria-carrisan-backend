@@ -21,16 +21,51 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function cimaGet(path) {
-  const res = await fetch(`${BASE}${path}`);
-  if (!res.ok) throw new Error(`CIMA ${path} -> HTTP ${res.status}`);
-  return res.json();
+const HEADERS = {
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+  Accept: 'application/json',
+  'Accept-Language': 'es-ES,es;q=0.9',
+};
+
+async function cimaGet(path, intentos = 3) {
+  for (let intento = 1; intento <= intentos; intento++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
+    try {
+      const res = await fetch(`${BASE}${path}`, { headers: HEADERS, signal: controller.signal });
+      clearTimeout(timeoutId);
+      const raw = await res.text();
+      if (!res.ok) throw new Error(`CIMA ${path} -> HTTP ${res.status}. Cuerpo: ${raw.slice(0, 300)}`);
+      if (!raw || raw.trim() === '') throw new Error(`CIMA ${path} -> respuesta vacía`);
+      return JSON.parse(raw);
+    } catch (e) {
+      clearTimeout(timeoutId);
+      const esUltimoIntento = intento === intentos;
+      if (esUltimoIntento) throw new Error(`CIMA ${path} falló tras ${intentos} intentos: ${e.message}`);
+      await sleep(1000 * intento);
+    }
+  }
 }
 
-async function fetchJson(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}`);
-  return res.json();
+async function fetchJson(url, intentos = 3) {
+  for (let intento = 1; intento <= intentos; intento++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
+    try {
+      const res = await fetch(url, { headers: HEADERS, signal: controller.signal });
+      clearTimeout(timeoutId);
+      const raw = await res.text();
+      if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}. Cuerpo: ${raw.slice(0, 300)}`);
+      if (!raw || raw.trim() === '') throw new Error(`${url} -> respuesta vacía`);
+      return JSON.parse(raw);
+    } catch (e) {
+      clearTimeout(timeoutId);
+      const esUltimoIntento = intento === intentos;
+      if (esUltimoIntento) throw new Error(`${url} falló tras ${intentos} intentos: ${e.message}`);
+      await sleep(1000 * intento);
+    }
+  }
 }
 
 // Convierte un array JS a literal de array de Postgres: {"a","b"}
@@ -55,18 +90,44 @@ function toCsv(rows, headers) {
 }
 
 // ---------- Fase A: ATC completo (maestra=7) ----------
-async function descargarAtc() {
-  let pagina = 1;
-  const items = [];
-  while (true) {
-    const data = await cimaGet(`/maestras?maestra=7&pagina=${pagina}`);
-    if (!data.resultados || data.resultados.length === 0) break;
-    items.push(...data.resultados);
-    if (items.length >= data.totalFilas) break;
-    pagina++;
+const LETRAS = 'ABCDEFGHIJKLMNÑOPQRSTUVWXYZ'.split('');
+
+// Descarga un maestro completo (ATC=7, principios activos=1) particionando
+// por letra inicial del nombre, porque sin filtro la API de CIMA no responde
+// (arma la lista completa en memoria antes de paginar). Con "nombre" filtrado
+// el conjunto es chico y responde rápido -- confirmado manualmente.
+async function descargarMaestraPorLetra(maestraId, etiqueta) {
+  const vistos = new Map(); // dedupe por codigo o id (algunas letras se solapan)
+  for (const letra of LETRAS) {
+    let pagina = 1;
+    while (true) {
+      let data;
+      try {
+        data = await cimaGet(`/maestras?maestra=${maestraId}&nombre=${encodeURIComponent(letra)}&pagina=${pagina}`);
+      } catch (e) {
+        console.warn(`  aviso: letra "${letra}" (${etiqueta}) falló, se omite -> ${e.message}`);
+        break;
+      }
+      const resultados = data.resultados || [];
+      if (resultados.length === 0) break;
+      for (const item of resultados) {
+        const clave = item.codigo || item.id;
+        if (!vistos.has(clave)) vistos.set(clave, item);
+      }
+      const tamanioPagina = data.tamanioPagina || resultados.length;
+      const totalPaginas = Math.ceil((data.totalFilas || resultados.length) / tamanioPagina);
+      if (pagina >= totalPaginas) break;
+      pagina++;
+      await sleep(DELAY_MS);
+    }
+    console.log(`  letra "${letra}" (${etiqueta}): ${vistos.size} acumulados`);
     await sleep(DELAY_MS);
   }
-  return items; // [{id, codigo, nombre}, ...]
+  return [...vistos.values()];
+}
+
+async function descargarAtc() {
+  return descargarMaestraPorLetra(7, 'ATC');
 }
 
 function nivelDeCodigo(codigo) {
@@ -81,17 +142,7 @@ function nivelDeCodigo(codigo) {
 
 // ---------- Fase B: Principios activos (maestra=1) + su ATC ----------
 async function descargarPrincipiosActivos() {
-  let pagina = 1;
-  const items = [];
-  while (true) {
-    const data = await cimaGet(`/maestras?maestra=1&pagina=${pagina}`);
-    if (!data.resultados || data.resultados.length === 0) break;
-    items.push(...data.resultados);
-    if (items.length >= data.totalFilas) break;
-    pagina++;
-    await sleep(DELAY_MS);
-  }
-  return items; // [{id, codigo, nombre}, ...]
+  return descargarMaestraPorLetra(1, 'principios activos');
 }
 
 async function atcParaPrincipioActivo(idPractiv1) {
@@ -208,6 +259,6 @@ async function main() {
 }
 
 main().catch((e) => {
-  console.error('Error fatal:', e);
-  process.exit(1);
+  console.error('Error fatal:', e.message);
+  process.exitCode = 1;
 });

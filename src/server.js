@@ -34,6 +34,8 @@ import valoracionesRoutes from './routes/valoraciones.routes.js';
 import { authLimiter, apiLimiter } from './middleware/Ratelimit.js';
 import uploadsRoutes from './routes/Uploads.routes.js';
 import staffRoutes from './routes/staff.routes.js';
+import staffAlmacenRoutes from './routes/staff.almacen.routes.js';
+import staffContabilidadRoutes from './routes/staff.contabilidad.routes.js';
 
 dotenv.config();
 
@@ -82,6 +84,8 @@ app.use('/favoritos', favoritosRoutes);
 app.use('/uploads', uploadsRoutes);
 app.use('/moleculas', moleculasRoutes);
 app.use('/staff/login', authLimiter);
+app.use('/staff/almacen', staffAlmacenRoutes);
+app.use('/staff/contabilidad', staffContabilidadRoutes);
 app.use('/staff', staffRoutes);
 app.use('/delivery-tarifas', tarifasDeliveryRoutes);
 app.use('/requerimientos', requerimientosRoutes);

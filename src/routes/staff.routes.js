@@ -4,9 +4,9 @@ import { verifyStaffJWT, checkRolStaff } from '../middleware/staffAuth.js';
 
 const router = Router();
 
-const ROLES_DESPACHO = ['despachador', 'administrador', 'admin'];
-const ROLES_VENTAS = ['vendedor', 'administrador', 'admin'];
-const ROLES_ADMIN = ['administrador', 'admin'];
+const ROLES_DESPACHO = ['despachador', 'administrador', 'director', 'admin'];
+const ROLES_VENTAS = ['vendedor', 'administrador', 'director', 'admin'];
+const ROLES_ADMIN = ['administrador', 'director', 'admin'];
 
 router.post('/login', loginStaff);
 router.get('/despacho', verifyStaffJWT, checkRolStaff(ROLES_DESPACHO), getColaDespacho);
