@@ -17,8 +17,8 @@
  * Requiere: npm install axios   (si no lo tienes ya en el proyecto)
  */
 
-const axios = require('axios');
-const fs = require('fs');
+import axios from 'axios';
+import fs from 'fs';
 
 const BASE = 'https://inhrr.gob.ve/sismed';
 const OUTPUT_JSON = 'productos_inhrr.json';
@@ -40,14 +40,17 @@ function parseCookies(setCookieHeaders) {
   return setCookieHeaders.map((c) => c.split(';')[0]).join('; ');
 }
 
-// Visita la página normal primero para conseguir la cookie de sesión
-// anónima (NextAuth) que la API espera ver en el POST.
+// Visita el endpoint de sesión de NextAuth (visto en el Network tab del
+// navegador: /sismed/api/auth/session) para conseguir la cookie que la
+// API de búsqueda espera ver en el POST.
 async function obtenerCookies() {
-  const res = await axios.get(`${BASE}/productos-farma`, {
+  const res = await axios.get(`${BASE}/api/auth/session`, {
     headers: HEADERS_BASE,
     validateStatus: () => true,
   });
-  return parseCookies(res.headers['set-cookie']);
+  const cookie = parseCookies(res.headers['set-cookie']);
+  console.log(`  cookie obtenida: ${cookie ? cookie.slice(0, 60) + '...' : '(vacía -- el sitio no devolvió Set-Cookie aquí)'}`);
+  return cookie;
 }
 
 function bodyBusqueda(take) {
@@ -77,13 +80,27 @@ async function buscarProductos(cookie, take, intentos = 3) {
           Cookie: cookie,
         },
         timeout: 60000,
+        validateStatus: () => true, // manejamos nosotros los códigos de error, para poder inspeccionarlos
       });
+
+      const contentType = res.headers['content-type'] || '';
+      const esJson = contentType.includes('application/json');
+      const cuerpoComoTexto = esJson ? JSON.stringify(res.data) : String(res.data);
+
+      if (res.status !== 200 || !esJson || res.data?.success !== true) {
+        console.warn(
+          `  aviso: respuesta inesperada (take=${take}) -> HTTP ${res.status}, content-type "${contentType}"\n` +
+            `  primeros 300 caracteres: ${cuerpoComoTexto.slice(0, 300)}`
+        );
+        throw new Error(`respuesta inesperada, HTTP ${res.status}`);
+      }
+
       return res.data; // { success, message, combinedData, countTotal }
     } catch (e) {
       const esUltimoIntento = intento === intentos;
       const info = e.response ? `HTTP ${e.response.status}` : e.message;
       if (esUltimoIntento) throw new Error(`Falló la búsqueda (take=${take}) tras ${intentos} intentos: ${info}`);
-      console.warn(`  aviso: intento ${intento} falló (${info}), reintentando...`);
+      console.warn(`  reintentando (intento ${intento} falló: ${info})...`);
       await sleep(2000 * intento);
     }
   }
