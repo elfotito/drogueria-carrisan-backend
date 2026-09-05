@@ -73,9 +73,9 @@ Login aparte para trabajadores de la empresa (vendedores, despachadores, almacen
 - Rutas bajo `/staff`:
   - `routes/staff.routes.js` + `controllers/staff.controller.js` — login, despacho, órdenes a cliente, bridge admin.
   - `routes/staff.almacen.routes.js` + `controllers/almacen.controller.js` — aprobación de órdenes, colas de revisar/preparar, envío.
-  - `routes/staff.contabilidad.routes.js` + `controllers/contabilidad.controller.js` — estado de cuenta, pagos, facturas, reportes de pago.
+  - `routes/staff.contabilidad.routes.js` + `controllers/contabilidad.controller.js` — estado de cuenta, pagos, facturas, reportes de pago. `createFactura` acepta además `tipo` ('factura'|'nota_credito'|'nota_debito'), `factura_referencia_id` y `motivo` para **notas de crédito/débito** — requiere la migración `012_facturas_tipo_notas.sql` (columna `tipo` en `facturas`).
   - `middleware/staffAuth.js` — `verifyStaffJWT` + `checkRolStaff([...])`.
-- Tabla propia `staff` (no `users`), con `rol` en (`vendedor`, `despachador`, `almacenista`, `contabilidad`, `administrador`, `director`, `admin`) y su propio `token_version`. Ver migraciones `008_staff.sql`, **`009_roles_staff.sql`** (amplía el CHECK de rol) y **`010_ordenes_items_anulado.sql`** (aprobación de órdenes: `anulado` + `nota_anulacion`).
+- Tabla propia `staff` (no `users`), con `rol` en (`vendedor`, `despachador`, `almacenista`, `contabilidad`, `administrador`, `director`, `admin`) y su propio `token_version`. Ver migraciones `008_staff.sql`, **`009_roles_staff.sql`** (amplía el CHECK de rol), **`010_ordenes_items_anulado.sql`** (aprobación de órdenes: `anulado` + `nota_anulacion`) y **`012_facturas_tipo_notas.sql`** (facturas: `tipo`/`factura_referencia_id`/`motivo` para notas).
 - **Roles**: `vendedor` (crear órdenes), `despachador` (despacho), `almacenista` (aprobación y preparación de órdenes), `contabilidad` (cuentas/pagos/facturas), `administrador`/`director`/`admin` (acceso amplio a módulos; `director` ve TODOS los módulos staff). El bridge al `/admin` del dueño es para `administrador`/`director`/`admin`.
 - El JWT de staff lleva `tipo: 'staff'` + `rol`; el de cliente lleva `es_admin`. `verifyStaffJWT` rechaza cualquier token sin `tipo === 'staff'` aunque compartan `JWT_SECRET` — un token de cliente nunca pasa por rutas de staff.
 - **Endpoints `/staff`**:
@@ -85,11 +85,11 @@ Login aparte para trabajadores de la empresa (vendedores, despachadores, almacen
   - `POST /staff/ordenes` — vendedor crea pedido a nombre de un cliente (usa `construirOrden` con `creado_por_staff_id`).
   - `POST /staff/admin-bridge` — staff admin/director recibe un JWT de CLIENTE válido para entrar al panel `/admin` (empareja por email con cuenta `users` `es_admin=true`).
   - **`/staff/almacen`** (`almacenista/administrador/director/admin`): `GET /revisar` (cola `pedido_creado` con items y stock), `GET /preparar` (cola unificada `procesando`+`preparando`); `PATCH /:id/aprobar` (ajusta cantidades, anula items agotados con nota, recalcula `total_usd`, pasa a `procesando` y bifurca: contado→`estado_pago='esperando'` / crédito→`preparando` con `fecha_vencimiento`); `PATCH /:id/cancelar` (solo `pedido_creado`/`preparando`); `PATCH /:id/enviado` (`preparando→enviado`). Usa `validarTransicion`/`aplicarCambioEstado` + el helper `bifurcarProcesando` de `ordenes.controller.js`. OJO: NO existe `PATCH /:id/preparando` — `procesando→preparando` queda exclusivo de la verificación de pago de contabilidad.
-  - **`/staff/contabilidad`** (`contabilidad/administrador/director/admin`): `GET /clientes` (resumen), `GET /clientes/:id` (detalle), `GET /clientes/:id/comparativa`, `GET /clientes/:id/sin-facturar`; `GET|POST /pagos`, `DELETE /pagos/:id`; `GET|POST /facturas`, `PATCH|DELETE /facturas/:id`; `GET /reportes-pago`, `PATCH /reportes-pago/:id/verificar`, `PATCH /reportes-pago/:id/rechazar`. Duplica la lógica de `/admin` (facturas/pagos/estadocuenta/reportes) pero con sesión staff; **`created_by` = `req.staff.id`** (en pagos/facturas/reportes). No toca los controllers de `/admin`.
-- Frontend: `src/pages/staff/` (StaffLogin, StaffDashboard, StaffAlmacen, StaffContabilidad, StaffDespacho, StaffOrdenes), `src/components/staff/` (LayoutStaff + NavStaff, sidebar persistente), `src/context/StaffAuthContext.jsx`, `src/api/staffAxios.js` (token propio `staff_token`, sesion independiente de la de cliente), `src/components/PrivateRouteStaff.jsx`.
+  - **`/staff/contabilidad`** (`contabilidad/administrador/director/admin`): `GET /clientes` (resumen), `GET /clientes/:id` (detalle), `GET /clientes/:id/comparativa`, `GET /clientes/:id/sin-facturar`; `GET|POST /pagos`, `DELETE /pagos/:id`; `GET|POST /facturas` (POST acepta `tipo`/`factura_referencia_id`/`motivo` para notas con la migración 012), `PATCH|DELETE /facturas/:id`; `GET /reportes-pago`, `PATCH /reportes-pago/:id/verificar`, `PATCH /reportes-pago/:id/rechazar`. Duplica la lógica de `/admin` (facturas/pagos/estadocuenta/reportes) pero con sesión staff; **`created_by` = `req.staff.id`** (en pagos/facturas/reportes). No toca los controllers de `/admin`. Las páginas de Finanzas del frontend (Ventas, Cuentas por cobrar, Pagos, Órdenes por cancelar) consumen estos endpoints SIN cambios de ruta.
+- Frontend: `src/pages/staff/` (StaffLogin, StaffDashboard, StaffAlmacen, StaffDespacho, StaffOrdenes, StaffVentas, StaffCuentasPorCobrar, StaffPagos, StaffOrdenesPorCancelar), `src/components/staff/` (LayoutStaff + NavStaff, sidebar persistente), `src/context/StaffAuthContext.jsx`, `src/api/staffAxios.js` (token propio `staff_token`, sesion independiente de la de cliente), `src/components/PrivateRouteStaff.jsx`.
 - **Orden de montaje en `server.js`**: `/staff/almacen` y `/staff/contabilidad` se montan ANTES de `/staff` (llegan antes que el router base).
 
-**Importante**: la tabla `staff` y la columna `ordenes.creado_por_staff_id` NO existen en una BD sin ejecutar la migracion `008_staff.sql`; los roles nuevos (`almacenista`, `contabilidad`, `director`) no funcionan sin `009_roles_staff.sql`. El módulo de aprobación (ajustar cantidades / anular items) no funciona sin `010_ordenes_items_anulado.sql`.
+**Importante**: la tabla `staff` y la columna `ordenes.creado_por_staff_id` NO existen en una BD sin ejecutar la migracion `008_staff.sql`; los roles nuevos (`almacenista`, `contabilidad`, `director`) no funcionan sin `009_roles_staff.sql`. El módulo de aprobación (ajustar cantidades / anular items) no funciona sin `010_ordenes_items_anulado.sql`, y las notas de crédito/débito de Ventas no funcionan sin `012_facturas_tipo_notas.sql`.
 
 ### Pipeline de estados de órdenes (relevante para staff)
 
@@ -108,8 +108,8 @@ Se construyó el flujo de aprobación del almacenista. Docs: `analisis/2026-09-0
 - Migración `010_ordenes_items_anulado.sql`: `anulado BOOLEAN` + `nota_anulacion TEXT` en `ordenes_items` (auditoría — el item no se borra, el total excluye anulados).
 - `almacen.controller.js`: `getColaRevisar`, `getColaPreparar`, `aprobarOrden` (ajusta cantidades/anula/recalcula total y notifica si hubo cambios), `cancelarOrden`, `marcarEnviado`. Se ELIMINARON `getColaAlmacen` y `marcarPreparando` — no reintroducirlos.
 - `ordenes.controller.js`: helper `bifurcarProcesando(orden)`; `updateEstadoOrden` lo usa (ya no bifurca inline).
-- `contabilidad.controller.js` + rutas: `GET /staff/contabilidad/ordenes-procesando` (contado esperando pago) y `PATCH /staff/contabilidad/ordenes/:id/cancelar` (tab "Por cobrar" en el frontend).
-- Frontend: `StaffAlmacen.jsx` con tabs "Por revisar" / "Por preparar" y `StaffContabilidad.jsx` con tab "Por cobrar".
+- `contabilidad.controller.js` + rutas: `GET /staff/contabilidad/ordenes-procesando` (contado esperando pago) y `PATCH /staff/contabilidad/ordenes/:id/cancelar` (módulo "Órdenes por cancelar" en el frontend).
+- Frontend: `StaffAlmacen.jsx` con tabs "Por revisar" / "Por preparar" y `StaffOrdenesPorCancelar.jsx` con la cola de cancelación.
 
 Ideas pendientes (ver `analisis/plan-modulos-staff-por-rol.md`): proveedores, estadísticas separadas del staff, historial de actividad de aprobación (quién ajustó/anuló qué), y asegurar notificación por item anulado cuando ya hay cambios.
 
@@ -168,6 +168,7 @@ Las migraciones son SQL plano. NO hay sistema de migraciones automatico — se e
 | 009_roles_staff.sql | Amplia el CHECK `staff.rol` (DROP CONSTRAINT) para incluir `almacenista`, `contabilidad`, `director` |
 | 010_ordenes_items_anulado.sql | Aprobación de órdenes: columnas `anulado` + `nota_anulacion` en `ordenes_items` |
 | 011_codigos_invitacion_tipo_staff.sql | Códigos de invitación: columnas `tipo` ('honorifico'\|'staff') + `rol_staff` para códigos de staff |
+| 012_facturas_tipo_notas.sql | Facturas: columnas `tipo` ('factura'\|'nota_credito'\|'nota_debito'), `factura_referencia_id` y `motivo` para notas de crédito/débito (Ventas) |
 
 **IMPORTANTE**: La tabla principal `users` NO esta en estas migraciones — fue creada directamente en Supabase. Si necesitas ver su schema, busca las queries en los controllers (especialmente auth.controller.js y users.controller.js).
 

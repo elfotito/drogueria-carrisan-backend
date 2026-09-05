@@ -366,8 +366,20 @@ export async function getFacturas(req, res) {
 }
 
 // POST /staff/contabilidad/facturas — crear factura, opcionalmente agrupando órdenes.
+// `tipo` puede ser 'factura' (default), 'nota_credito' o 'nota_debito' (requiere la
+// migración 012). `factura_referencia_id` enlaza una nota a la factura que ajusta;
+// `motivo` describe la razón de la nota.
 export async function createFactura(req, res) {
-  const { usuario_id, numero_factura, monto_facturado, nota, orden_ids } = req.body;
+  const {
+    usuario_id,
+    numero_factura,
+    monto_facturado,
+    nota,
+    orden_ids,
+    tipo,
+    factura_referencia_id,
+    motivo,
+  } = req.body;
 
   if (!usuario_id || !numero_factura || !monto_facturado) {
     return res.status(400).json({ error: 'usuario_id, numero_factura y monto_facturado son requeridos' });
@@ -382,6 +394,9 @@ export async function createFactura(req, res) {
         monto_facturado,
         nota,
         created_by: req.staff.id,
+        ...(tipo ? { tipo } : {}),
+        ...(factura_referencia_id ? { factura_referencia_id: Number(factura_referencia_id) } : {}),
+        ...(motivo ? { motivo } : {}),
       })
       .select()
       .single();
@@ -408,11 +423,13 @@ export async function createFactura(req, res) {
       }
     }
 
+    const tipoDoc = tipo === 'nota_credito' ? 'Nota de crédito' : tipo === 'nota_debito' ? 'Nota de débito' : 'Factura';
+
     await crearNotificacion(
       Number(usuario_id),
       'factura_emitida',
-      'Factura emitida',
-      `Se emitió la factura #${numero_factura} por $${monto_facturado}`,
+      `${tipoDoc} emitida`,
+      `Se emitió ${tipoDoc === 'Factura' ? 'la factura' : 'la nota'} #${numero_factura} por $${monto_facturado}`,
       null
     );
 
