@@ -1,128 +1,85 @@
 /**
- * Descarga el catálogo completo de productos farmacéuticos del INHRR
- * (Venezuela) usando su API interna de búsqueda, en vez de adivinar
- * números de registro uno por uno.
- *
- * Endpoint real (descubierto inspeccionando el Network tab del navegador):
- *   POST https://inhrr.gob.ve/sismed/api/productos-farma
- *   body: { ...filtros vacíos..., take: N }
- *   -> { success, message, combinedData: [...], countTotal }
- *
- * "Cargar más" en la web NO pagina con skip/offset -- simplemente vuelve
- * a pedir todo con un `take` más grande. Por eso acá pedimos directo con
- * take = countTotal (con margen), y si el servidor lo limita, caemos a
- * pedir en bloques crecientes hasta alcanzar el total.
- *
- * Uso: node scraper-inhrr.js
- * Requiere: npm install axios   (si no lo tienes ya en el proyecto)
+ * Scraper INHRR - Versión final corregida
+ * Usa el formato reqQuery que es el que acepta el servidor
  */
 
 import axios from 'axios';
 import fs from 'fs';
 
+// Tus cookies de Firefox (actualízalas si expiran)
+const FIREFOX_COOKIES = '__Host-authjs.csrf-token=b688830228c2b6073332b06ff68c79736d1a4db47a91e9db7a95cdd5c4ea0640%7C08571a2f040aa492f2eeb0bb8a6141496c8bc0446a2d305ee2e60540bff25e08; __Secure-authjs.callback-url=https%3A%2F%2Finhrr.gob.ve';
+
 const BASE = 'https://inhrr.gob.ve/sismed';
 const OUTPUT_JSON = 'productos_inhrr.json';
 const OUTPUT_CSV = 'productos_inhrr.csv';
 
-const HEADERS_BASE = {
-  'User-Agent':
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
-  Accept: 'application/json, text/plain, */*',
-  'Accept-Language': 'es-ES,es;q=0.9',
+// Headers EXACTOS que usa Firefox
+const FIREFOX_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0',
+  'Accept': 'application/json, text/plain, */*',
+  'Accept-Language': 'es-ES,es;q=0.8,en-US;q=0.5,en;q=0.3',
+  'Accept-Encoding': 'gzip, deflate, br',
+  'Origin': 'https://inhrr.gob.ve',
+  'Connection': 'keep-alive',
+  'Referer': 'https://inhrr.gob.ve/sismed/productos-farma',
+  'Sec-Fetch-Dest': 'empty',
+  'Sec-Fetch-Mode': 'cors',
+  'Sec-Fetch-Site': 'same-origin',
+  'TE': 'trailers',
 };
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function parseCookies(setCookieHeaders) {
-  if (!setCookieHeaders) return '';
-  return setCookieHeaders.map((c) => c.split(';')[0]).join('; ');
-}
-
-// Combina las cookies de dos fuentes: la página normal (que puede setear
-// __Secure-authjs.callback-url) y el endpoint de sesión de NextAuth (que
-// setea __Host-authjs.csrf-token). El servidor podría exigir ambas.
-async function obtenerCookies() {
-  const jar = new Map();
-
-  const agregarCookies = (setCookieHeaders) => {
-    if (!setCookieHeaders) return;
-    for (const c of setCookieHeaders) {
-      const parPrincipal = c.split(';')[0];
-      const igual = parPrincipal.indexOf('=');
-      const nombre = parPrincipal.slice(0, igual);
-      jar.set(nombre, parPrincipal);
-    }
-  };
-
-  const res1 = await axios.get(`${BASE}/productos-farma`, {
-    headers: HEADERS_BASE,
-    validateStatus: () => true,
-  });
-  agregarCookies(res1.headers['set-cookie']);
-
-  const res2 = await axios.get(`${BASE}/api/auth/session`, {
-    headers: { ...HEADERS_BASE, Cookie: [...jar.values()].join('; ') },
-    validateStatus: () => true,
-  });
-  agregarCookies(res2.headers['set-cookie']);
-
-  const cookie = [...jar.values()].join('; ');
-  console.log(`  cookies obtenidas (${jar.size}): ${[...jar.keys()].join(', ')}`);
-  return cookie;
-}
-
-function bodyBusqueda(take) {
-  return {
-    desdeFechaAprobado: '',
-    equalPA: '',
-    fabricante: '',
-    farmaceuticoPatrocinante: '',
-    general: '',
-    hastaFechaAprobado: '',
-    nombreProd: '',
-    numeroRegistro: '',
-    principioActivo: '',
-    representante: '',
-    take,
-  };
-}
-
-async function buscarProductos(cookie, take, intentos = 3) {
+// Función para hacer la búsqueda con el formato correcto
+async function buscarProductos(cookie, take, query = '', intentos = 3) {
   for (let intento = 1; intento <= intentos; intento++) {
     try {
-      const res = await axios.post(`${BASE}/api/productos-farma`, JSON.stringify(bodyBusqueda(take)), {
-        headers: {
-          ...HEADERS_BASE,
-          'Content-Type': 'text/plain;charset=UTF-8', // el navegador manda así, no application/json
-          Origin: 'https://inhrr.gob.ve',
-          Referer: `${BASE}/productos-farma`,
-          Cookie: cookie,
-        },
-        timeout: 60000,
-        validateStatus: () => true, // manejamos nosotros los códigos de error, para poder inspeccionarlos
-      });
-
-      const contentType = res.headers['content-type'] || '';
-      const esJson = contentType.includes('application/json');
-      const cuerpoComoTexto = esJson ? JSON.stringify(res.data) : String(res.data);
-
-      if (res.status !== 200 || !esJson || res.data?.success !== true) {
-        console.warn(
-          `  aviso: respuesta inesperada (take=${take}) -> HTTP ${res.status}, content-type "${contentType}"\n` +
-            `  primeros 300 caracteres: ${cuerpoComoTexto.slice(0, 300)}`
-        );
-        throw new Error(`respuesta inesperada, HTTP ${res.status}`);
+      console.log(`  Buscando productos (take=${take}, intento ${intento}/${intentos})...`);
+      
+      const body = {
+        reqQuery: {
+          general: query,
+          take: take
+        }
+      };
+      
+      const res = await axios.post(
+        `${BASE}/api/productos-farma`,
+        body,
+        {
+          headers: {
+            ...FIREFOX_HEADERS,
+            'Content-Type': 'application/json',
+            'Cookie': cookie,
+          },
+          timeout: 120000, // 2 minutos para respuestas grandes
+          validateStatus: () => true,
+          maxContentLength: Infinity,
+          maxBodyLength: Infinity,
+        }
+      );
+      
+      if (res.status === 200 && res.data?.success === true) {
+        const count = res.data.combinedData?.length || 0;
+        console.log(`  ✓ Éxito: ${count} productos recibidos`);
+        return res.data;
       }
-
-      return res.data; // { success, message, combinedData, countTotal }
+      
+      console.warn(`  Respuesta inesperada:`, res.data);
+      throw new Error('El servidor rechazó la solicitud');
+      
     } catch (e) {
       const esUltimoIntento = intento === intentos;
       const info = e.response ? `HTTP ${e.response.status}` : e.message;
-      if (esUltimoIntento) throw new Error(`Falló la búsqueda (take=${take}) tras ${intentos} intentos: ${info}`);
-      console.warn(`  reintentando (intento ${intento} falló: ${info})...`);
-      await sleep(2000 * intento);
+      
+      if (esUltimoIntento) {
+        throw new Error(`Falló la búsqueda (take=${take}): ${info}`);
+      }
+      
+      console.warn(`  Reintentando en ${intento * 5} segundos...`);
+      await sleep(5000 * intento);
     }
   }
 }
@@ -134,43 +91,123 @@ function csvEscape(v) {
   if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
   return s;
 }
+
 function toCsv(rows, headers) {
   const lines = [headers.join(',')];
-  for (const r of rows) lines.push(headers.map((h) => csvEscape(r[h])).join(','));
+  for (const r of rows) {
+    lines.push(headers.map((h) => csvEscape(r[h])).join(','));
+  }
   return lines.join('\n');
 }
 
 async function main() {
-  console.log('Obteniendo cookie de sesión...');
-  const cookie = await obtenerCookies();
-
-  console.log('Consultando el total real de productos (con take=150, valor ya confirmado que funciona en el navegador)...');
-  const probe = await buscarProductos(cookie, 150);
-  const total = probe.countTotal;
-  console.log(`countTotal reportado por el sitio: ${total}`);
-
-  console.log(`Pidiendo los ${total} productos en una sola llamada (puede tardar, es una respuesta grande)...`);
-  let data = await buscarProductos(cookie, total + 100);
-  let productos = data.combinedData || [];
-  console.log(`Recibidos: ${productos.length} / ${total}`);
-
-  // Fallback: si el servidor limita el take y no trajo todo, subimos
-  // en bloques hasta alcanzar el total (cada vez pide desde cero, así
-  // que solo nos quedamos con la última respuesta, la más completa).
-  let take = productos.length;
-  const PASO = 2000;
-  while (productos.length < total && take < total + PASO) {
-    take += PASO;
-    console.log(`  no llegó completo, reintentando con take=${take}...`);
-    data = await buscarProductos(cookie, take);
+  console.log('=== INHRR Scraper - Versión Final ===\n');
+  
+  const cookie = FIREFOX_COOKIES;
+  
+  // 1. Obtener el total de productos
+  console.log('1. Obteniendo total de productos...');
+  const probe = await buscarProductos(cookie, 10);
+  const total = probe.countTotal || 22706;
+  console.log(`   Total de productos reportado: ${total}\n`);
+  
+  // 2. Intentar obtener todos los productos de una vez
+  console.log(`2. Intentando obtener todos los ${total} productos de una vez...`);
+  console.log('   (Esto puede tardar varios minutos, ten paciencia)');
+  
+  let productos = [];
+  let data = null;
+  
+  try {
+    data = await buscarProductos(cookie, total + 100, '', 1);
     productos = data.combinedData || [];
-    console.log(`  ahora: ${productos.length} / ${total}`);
-    await sleep(500);
+    console.log(`   Obtenidos: ${productos.length} / ${total} productos\n`);
+  } catch (e) {
+    console.warn(`   No se pudo obtener todo de una vez: ${e.message}`);
+    console.log('   Intentando en bloques más pequeños...\n');
   }
-
+  
+  // 3. Si no se obtuvieron todos, intentar en bloques
+  if (productos.length < total) {
+    console.log('3. Obteniendo productos en bloques...');
+    
+    // Estrategia: aumentar gradualmente el take
+    const bloques = [100, 500, 1000, 2000, 5000, 10000, 20000, total + 100];
+    
+    for (const take of bloques) {
+      if (take > total + 100) break;
+      
+      console.log(`   Intentando con take=${take}...`);
+      try {
+        data = await buscarProductos(cookie, take, '', 2);
+        productos = data.combinedData || [];
+        
+        console.log(`   Obtenidos: ${productos.length} / ${total} productos`);
+        
+        if (productos.length >= total) {
+          console.log('   ✓ ¡Productos completos obtenidos!');
+          break;
+        }
+      } catch (e) {
+        console.warn(`   Error con take=${take}: ${e.message}`);
+      }
+      
+      await sleep(2000); // Esperar entre intentos
+    }
+  }
+  
+  // 4. Si aún faltan productos, intentar con búsquedas por letra
+  if (productos.length < total) {
+    console.log('\n4. Buscando productos por letra inicial...');
+    
+    const letras = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+    const productosUnicos = new Map();
+    
+    // Agregar productos ya obtenidos
+    for (const p of productos) {
+      if (p.id) productosUnicos.set(p.id, p);
+    }
+    
+    for (const letra of letras) {
+      console.log(`   Buscando productos que empiezan con "${letra}"...`);
+      
+      try {
+        const dataLetra = await buscarProductos(cookie, 5000, letra, 2);
+        const productosLetra = dataLetra.combinedData || [];
+        
+        for (const p of productosLetra) {
+          if (p.id) productosUnicos.set(p.id, p);
+        }
+        
+        console.log(`   Total acumulado: ${productosUnicos.size} / ${total}`);
+        
+        if (productosUnicos.size >= total) {
+          console.log('   ✓ ¡Productos completos obtenidos!');
+          break;
+        }
+      } catch (e) {
+        console.warn(`   Error con letra ${letra}: ${e.message}`);
+      }
+      
+      await sleep(1000);
+    }
+    
+    productos = Array.from(productosUnicos.values());
+  }
+  
+  // 5. Guardar resultados
+  console.log('\n5. Guardando resultados...');
+  
+  if (productos.length === 0) {
+    console.error('No se obtuvieron productos. Abortando.');
+    return;
+  }
+  
+  // Guardar JSON
   fs.writeFileSync(OUTPUT_JSON, JSON.stringify(productos, null, 2), 'utf8');
-  console.log(`-> ${OUTPUT_JSON} guardado (${productos.length} productos)`);
-
+  console.log(`   -> ${OUTPUT_JSON} guardado (${productos.length} productos)`);
+  
+  // Guardar CSV
   const headers = [
     'ef',
     'id',
@@ -189,13 +226,24 @@ async function main() {
     'fechaVigencia',
     'fechaCancelado',
   ];
+  
   fs.writeFileSync(OUTPUT_CSV, toCsv(productos, headers), 'utf8');
-  console.log(`-> ${OUTPUT_CSV} guardado`);
-
+  console.log(`   -> ${OUTPUT_CSV} guardado`);
+  
+  // Resumen final
+  console.log('\n=== Resumen Final ===');
+  console.log(`Total esperado: ${total}`);
+  console.log(`Total obtenido: ${productos.length}`);
+  console.log(`Completado: ${((productos.length / total) * 100).toFixed(2)}%`);
+  
   if (productos.length < total) {
-    console.warn(
-      `\nAviso: solo se obtuvieron ${productos.length} de ${total} reportados. El servidor puede tener un límite de "take" más bajo -- revisar manualmente.`
-    );
+    console.log('\n⚠️  No se obtuvieron todos los productos.');
+    console.log('Sugerencias:');
+    console.log('1. Actualiza las cookies en el script');
+    console.log('2. Usa una VPN con IP venezolana');
+    console.log('3. Intenta en diferentes horarios');
+  } else {
+    console.log('\n✓ ¡Scraping completado exitosamente!');
   }
 }
 

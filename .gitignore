@@ -1,3 +1,5 @@
 node_modules/
 .env
 obtener-refresh-token.js
+scraper-inhrr.mjs
+poblar-vademecum.js
