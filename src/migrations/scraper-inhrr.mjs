@@ -40,16 +40,36 @@ function parseCookies(setCookieHeaders) {
   return setCookieHeaders.map((c) => c.split(';')[0]).join('; ');
 }
 
-// Visita el endpoint de sesión de NextAuth (visto en el Network tab del
-// navegador: /sismed/api/auth/session) para conseguir la cookie que la
-// API de búsqueda espera ver en el POST.
+// Combina las cookies de dos fuentes: la página normal (que puede setear
+// __Secure-authjs.callback-url) y el endpoint de sesión de NextAuth (que
+// setea __Host-authjs.csrf-token). El servidor podría exigir ambas.
 async function obtenerCookies() {
-  const res = await axios.get(`${BASE}/api/auth/session`, {
+  const jar = new Map();
+
+  const agregarCookies = (setCookieHeaders) => {
+    if (!setCookieHeaders) return;
+    for (const c of setCookieHeaders) {
+      const parPrincipal = c.split(';')[0];
+      const igual = parPrincipal.indexOf('=');
+      const nombre = parPrincipal.slice(0, igual);
+      jar.set(nombre, parPrincipal);
+    }
+  };
+
+  const res1 = await axios.get(`${BASE}/productos-farma`, {
     headers: HEADERS_BASE,
     validateStatus: () => true,
   });
-  const cookie = parseCookies(res.headers['set-cookie']);
-  console.log(`  cookie obtenida: ${cookie ? cookie.slice(0, 60) + '...' : '(vacía -- el sitio no devolvió Set-Cookie aquí)'}`);
+  agregarCookies(res1.headers['set-cookie']);
+
+  const res2 = await axios.get(`${BASE}/api/auth/session`, {
+    headers: { ...HEADERS_BASE, Cookie: [...jar.values()].join('; ') },
+    validateStatus: () => true,
+  });
+  agregarCookies(res2.headers['set-cookie']);
+
+  const cookie = [...jar.values()].join('; ');
+  console.log(`  cookies obtenidas (${jar.size}): ${[...jar.keys()].join(', ')}`);
   return cookie;
 }
 
@@ -124,8 +144,8 @@ async function main() {
   console.log('Obteniendo cookie de sesión...');
   const cookie = await obtenerCookies();
 
-  console.log('Consultando el total real de productos...');
-  const probe = await buscarProductos(cookie, 1);
+  console.log('Consultando el total real de productos (con take=150, valor ya confirmado que funciona en el navegador)...');
+  const probe = await buscarProductos(cookie, 150);
   const total = probe.countTotal;
   console.log(`countTotal reportado por el sitio: ${total}`);
 
@@ -183,5 +203,3 @@ main().catch((e) => {
   console.error('Error fatal:', e.message);
   process.exitCode = 1;
 });
-
-
