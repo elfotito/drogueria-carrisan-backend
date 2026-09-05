@@ -169,8 +169,10 @@ export async function getReportePagoById(req, res) {
 // ---------------------------------------------------------------
 // PATCH /reportes-pago/:id/verificar (admin)
 // Al verificar: genera una factura agrupando las órdenes del reporte,
-// crea un pago que la salda de inmediato (sin parciales), y avanza
-// esas órdenes de 'procesando' a 'preparando'.
+// crea un pago que la salda de inmediato (sin parciales), y marca el pago
+// como verificado. El pago es condición (estado_pago), no estado logístico:
+// las órdenes ya están en 'preparando'. Solo las órdenes LEGACY que
+// quedaron en 'procesando' migran a 'preparando' (con su historial).
 // ---------------------------------------------------------------
 export async function verificarReportePago(req, res) {
   const { id } = req.params;
@@ -279,7 +281,16 @@ export async function verificarReportePago(req, res) {
 
     if (errorUpdateReporte) throw errorUpdateReporte;
 
-    // 8. Actualizar órdenes
+    // 8. Saber qué órdenes del reporte aún están en 'procesando' (legacy)
+    //    para migrarlas a 'preparando' con su historial.
+    const { data: ordenesActuales, error: errorEstados } = await supabase
+      .from('ordenes')
+      .select('id, estado')
+      .in('id', orden_ids);
+    if (errorEstados) throw errorEstados;
+
+    const enProcesando = (ordenesActuales || []).filter(o => o.estado === 'procesando');
+
     const { error: errorUpdatePagoOrdenes } = await supabase
       .from('ordenes')
       .update({ estado_pago: 'verificado' })
@@ -287,31 +298,30 @@ export async function verificarReportePago(req, res) {
 
     if (errorUpdatePagoOrdenes) throw errorUpdatePagoOrdenes;
 
-    // 9. Avanzar órdenes a 'preparando'
-    for (const orden_id of orden_ids) {
+    for (const orden of enProcesando) {
       const { error: errorUpdateEstado } = await supabase
         .from('ordenes')
         .update({ estado: 'preparando' })
-        .eq('id', orden_id);
+        .eq('id', orden.id);
 
       if (errorUpdateEstado) throw errorUpdateEstado;
 
       const { error: errorHistorial } = await supabase
         .from('ordenes_historial')
         .insert({ 
-          orden_id, 
+          orden_id: orden.id, 
           estado: 'preparando' 
         });
 
       if (errorHistorial) throw errorHistorial;
     }
 
-    // 10. Notificar al cliente
+    // 9. Notificar al cliente
     await crearNotificacion(
       reporte.usuario_id,
       'pago_verificado',
       'Pago verificado',
-      `Tu pago fue verificado. ${orden_ids.length === 1 ? `Tu orden #${orden_ids[0]} está` : `Tus órdenes ${orden_ids.map(o => `#${o}`).join(', ')} están`} pasando a preparación.`,
+      `Tu pago fue verificado. ${orden_ids.length === 1 ? `Tu orden #${orden_ids[0]}` : `Tus órdenes ${orden_ids.map(o => `#${o}`).join(', ')}`} continúa su preparación.`,
       null
     );
 

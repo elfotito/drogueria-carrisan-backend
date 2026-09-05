@@ -1,5 +1,5 @@
 import { supabase } from '../config/supabase.js';
-import { validarTransicion, aplicarCambioEstado, bifurcarProcesando } from './ordenes.controller.js';
+import { validarTransicion, aplicarCambioEstado } from './ordenes.controller.js';
 import { crearNotificacion } from './notificaciones.controller.js';
 
 const SELECT_ORDEN = '*, users(id, nombre, email, telefono), direcciones_envio(direccion, ciudad, estado), ordenes_items(*, productos(nombre_comercial))';
@@ -30,8 +30,9 @@ export async function getColaRevisar(req, res) {
 }
 
 // GET /staff/almacen/preparar — órdenes listas para preparar ('preparando').
-// Unión de órdenes a crédito aprobadas por el almacenista y contado verificadas
-// por contabilidad. Muestra dirección de envío y cantidades finales aprobadas.
+// Crédito y contado aprobadas convergen aquí (el pago pendiente de contado
+// se lee de estado_pago, no del estado logístico — ver AGENTS.md).
+// Muestra dirección de envío y cantidades finales aprobadas.
 export async function getColaPreparar(req, res) {
   try {
     const { data, error } = await supabase
@@ -50,8 +51,10 @@ export async function getColaPreparar(req, res) {
 
 // PATCH /staff/almacen/:id/aprobar — el almacenista aprueba una orden en
 // 'pedido_creado' tras ajustar cantidades y/o anular items agotados.
-// Recalcula total_usd (excluyendo anulados) y bifurca por forma de pago:
-// contado → 'procesando' + estado_pago 'esperando'; crédito → 'preparando'.
+// Recalcula total_usd (excluyendo anulados) y pasa directo a 'preparando'
+// (sin 'procesando' — la ventana de pago de contado se representa con
+// estado_pago, ver AGENTS.md). Para contado abre la ventana de pago con
+// estado_pago='esperando'; a crédito se calcula fecha_vencimiento.
 // Body esperado: { items: [{ id, cantidad?, anulado?, nota_anulacion? }] }
 export async function aprobarOrden(req, res) {
   const { id } = req.params;
@@ -125,10 +128,20 @@ export async function aprobarOrden(req, res) {
       .eq('id', id);
     if (errorTotal) throw errorTotal;
 
-    // Aprobar: transición base a 'procesando' + bifurcación por forma de pago.
+    // Aprobar: pasa directo a 'preparando' (sin 'procesando').
+    // Contado → se abre la ventana de pago (estado_pago='esperando');
+    // crédito → aplicarCambioEstado calcula fecha_vencimiento.
     const ordenConTotal = { ...orden, total_usd: nuevoTotal };
-    let data = await aplicarCambioEstado(ordenConTotal, 'procesando');
-    data = await bifurcarProcesando(data);
+
+    if (ordenConTotal.forma_pago === 'contado') {
+      const { error: errorAbrirPago } = await supabase
+        .from('ordenes')
+        .update({ estado_pago: 'esperando' })
+        .eq('id', id);
+      if (errorAbrirPago) throw errorAbrirPago;
+    }
+
+    const data = await aplicarCambioEstado(ordenConTotal, 'preparando');
 
     // Notificación adicional SOLO si hubo ajustes (cantidad o agotados).
     const agotadosIds = itemsFinales.filter(i => i.anulado).map(i => i.id);
@@ -196,6 +209,9 @@ export async function cancelarOrden(req, res) {
 }
 
 // PATCH /staff/almacen/:id/enviado — transición preparando→enviado.
+// Solo aplica a delivery/envío nacional con pago autorizado (crédito o
+// verificado). El backend obliga estas reglas, los botones del frontend
+// son solo presentación.
 export async function marcarEnviado(req, res) {
   const { id } = req.params;
 
@@ -209,14 +225,49 @@ export async function marcarEnviado(req, res) {
     if (error || !orden) {
       return res.status(404).json({ error: 'Orden no encontrada' });
     }
-    if (!validarTransicion(orden.estado, 'enviado')) {
-      return res.status(400).json({ error: `No se puede marcar como enviado desde el estado ${orden.estado}` });
+    if (!validarTransicion(orden.estado, 'enviado', {
+      tipo_envio: orden.tipo_envio,
+      forma_pago: orden.forma_pago,
+      estado_pago: orden.estado_pago,
+    })) {
+      return res.status(400).json({ error: 'Solo se puede marcar como enviada una orden de delivery/envío nacional con pago autorizado' });
     }
 
     const data = await aplicarCambioEstado(orden, 'enviado');
     res.json(data);
   } catch (err) {
     console.error('Error al marcar orden como enviada:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
+// PATCH /staff/almacen/:id/listo-para-retiro — transición
+// preparando→listo_para_retiro. Solo aplica a retiro con pago autorizado.
+export async function marcarListoParaRetiro(req, res) {
+  const { id } = req.params;
+
+  try {
+    const { data: orden, error } = await supabase
+      .from('ordenes')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error || !orden) {
+      return res.status(404).json({ error: 'Orden no encontrada' });
+    }
+    if (!validarTransicion(orden.estado, 'listo_para_retiro', {
+      tipo_envio: orden.tipo_envio,
+      forma_pago: orden.forma_pago,
+      estado_pago: orden.estado_pago,
+    })) {
+      return res.status(400).json({ error: 'Solo se puede marcar listo para retiro una orden de retiro con pago autorizado' });
+    }
+
+    const data = await aplicarCambioEstado(orden, 'listo_para_retiro');
+    res.json(data);
+  } catch (err) {
+    console.error('Error al marcar orden como lista para retiro:', err);
     res.status(500).json({ error: 'Error del servidor' });
   }
 }

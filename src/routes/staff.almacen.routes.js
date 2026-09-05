@@ -5,6 +5,7 @@ import {
   aprobarOrden,
   cancelarOrden,
   marcarEnviado,
+  marcarListoParaRetiro,
 } from '../controllers/almacen.controller.js';
 import { verifyStaffJWT, checkRolStaff } from '../middleware/staffAuth.js';
 
@@ -18,5 +19,6 @@ router.get('/preparar', verifyStaffJWT, checkRolStaff(ROLES_ALMACEN), getColaPre
 router.patch('/:id/aprobar', verifyStaffJWT, checkRolStaff(ROLES_ALMACEN), aprobarOrden);
 router.patch('/:id/cancelar', verifyStaffJWT, checkRolStaff(ROLES_ALMACEN), cancelarOrden);
 router.patch('/:id/enviado', verifyStaffJWT, checkRolStaff(ROLES_ALMACEN), marcarEnviado);
+router.patch('/:id/listo-para-retiro', verifyStaffJWT, checkRolStaff(ROLES_ALMACEN), marcarListoParaRetiro);
 
 export default router;

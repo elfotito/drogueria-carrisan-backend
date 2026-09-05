@@ -2,50 +2,109 @@ import { supabase } from '../config/supabase.js';
 import { crearNotificacion } from './notificaciones.controller.js';
 
 // ---------------------------------------------------------
-// Pipeline de estados de una orden. 'cancelado' es un estado
-// terminal fuera de la línea normal (una orden puede cancelarse
-// desde cualquier punto).
+// Pipeline de estados de una orden. REGLA CENTRAL (ver AGENTS.md):
+// ORDER STATUS ≠ PAYMENT STATUS ≠ FULFILLMENT METHOD.
+// `estado` es logística, `estado_pago` es pago y `tipo_envio` es
+// fulfillment (retiro/delivery/envio_nacional). NUNCA combinarlos.
 // ---------------------------------------------------------
-const ESTADOS_VALIDOS = ['pedido_creado', 'procesando', 'preparando', 'enviado', 'entregado', 'cancelado'];
+const ESTADOS_VALIDOS = [
+  'pedido_creado',
+  'preparando',
+  'enviado',
+  'entregado',
+  'listo_para_retiro',
+  'retirado',
+  'cancelado'
+];
 
 const LABELS_ESTADO = {
   pedido_creado: 'Pedido Creado',
-  procesando: 'Procesando',
   preparando: 'Preparando',
   enviado: 'Enviado',
   entregado: 'Entregado',
+  listo_para_retiro: 'Listo para Retiro',
+  retirado: 'Retirado',
   cancelado: 'Cancelado'
 };
 
 // Normaliza estados heredados (de antes de este pipeline) al nuevo set,
 // para que órdenes viejas sigan mostrando algo coherente en el timeline.
+// 'procesando' fue la ventana de pago de contado (hoy se representa con
+// estado_pago + permanencia en 'preparando'), así que también se normaliza.
 function normalizarEstado(estado) {
   const mapa = {
     pendiente: 'pedido_creado',
-    confirmado: 'procesando',
+    confirmado: 'preparando',
     en_preparacion: 'preparando',
-    finalizado: 'entregado'
+    finalizado: 'entregado',
+    procesando: 'preparando'
   };
   return mapa[estado] || estado;
 }
 
 // ---------------------------------------------------------
-// Pipeline lineal estricto: cada estado solo puede avanzar al
-// siguiente inmediato, sin saltarse pasos. 'cancelado' es alcanzable
-// desde cualquier estado no terminal. No hay retrocesos.
+// Pipeline no lineal: cada estado avanza según fulfillment method.
+// 'cancelado' es terminal; 'entregado'/'retirado' también.
 // ---------------------------------------------------------
+//
+// DELIVERY / ENVIO NACIONAL:
+//   pedido_creado → preparando → enviado → entregado
+//
+// RETIRO (pickup):
+//   pedido_creado → preparando → listo_para_retiro → retirado
+//
+// 'procesando' (LEGACY) solo existe para no romper órdenes viejas que
+// quedaron en esa ventana de pago: pueden avanzar a 'preparando' o
+// cancelarse. NUNCA se genera una orden nueva en 'procesando'.
 const TRANSICIONES_PERMITIDAS = {
-  pedido_creado: ['procesando', 'cancelado'],
-  procesando: ['preparando', 'cancelado'],
-  preparando: ['enviado', 'cancelado'],
-  enviado: ['entregado', 'cancelado'],
+  pedido_creado: ['preparando', 'cancelado'],
+  preparando: ['enviado', 'listo_para_retiro', 'cancelado'],
+  enviado: ['entregado'],
+  listo_para_retiro: ['retirado'],
   entregado: [],
-  cancelado: []
+  retirado: [],
+  cancelado: [],
+  procesando: ['preparando', 'cancelado'] // LEGACY — solo órdenes viejas
 };
 
-export function validarTransicion(estadoActual, estadoNuevo) {
+// Restricciones por fulfillment: si la transición exige un método de
+// entrega y la orden tiene otro, se rechaza. Las órdenes viejas sin
+// tipo_envio NO se bloquean (compatibilidad con datos históricos).
+const FULFILLMENT_REQUERIDO = {
+  'preparando→enviado': ['delivery', 'envio_nacional'],
+  'enviado→entregado': ['delivery', 'envio_nacional'],
+  'preparando→listo_para_retiro': ['retiro'],
+  'listo_para_retiro→retirado': ['retiro']
+};
+
+// Transiciones que exigen pago autorizado: crédito siempre está OK
+// (no requiere reporte); contado exige estado_pago='verificado'.
+const REQUIERE_PAGO_AUTORIZADO = {
+  'preparando→enviado': true,
+  'preparando→listo_para_retiro': true
+};
+
+// ctx: { tipo_envio, forma_pago, estado_pago } para validar fulfillment
+// y condición de pago. El BACKEND obliga estas reglas; los botones del
+// frontend son solo una capa de presentación.
+export function validarTransicion(estadoActual, estadoNuevo, ctx = {}) {
   const permitidas = TRANSICIONES_PERMITIDAS[estadoActual];
-  return Array.isArray(permitidas) && permitidas.includes(estadoNuevo);
+  if (!Array.isArray(permitidas) || !permitidas.includes(estadoNuevo)) return false;
+
+  const clave = `${estadoActual}→${estadoNuevo}`;
+
+  const fulfillmentRequerido = FULFILLMENT_REQUERIDO[clave];
+  if (fulfillmentRequerido && ctx.tipo_envio && !fulfillmentRequerido.includes(ctx.tipo_envio)) {
+    return false;
+  }
+
+  if (REQUIERE_PAGO_AUTORIZADO[clave]) {
+    if (ctx.forma_pago !== 'credito' && ctx.estado_pago !== 'verificado') {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 // ---------------------------------------------------------
@@ -177,8 +236,10 @@ export async function construirOrden(usuario_id, datos, opciones = {}) {
     // esto es solo la última línea de defensa.
   }
 
-  // Las órdenes a contado nacen esperando llegar a 'procesando' para
-  // habilitar el pago; estado_pago se setea ahí, no aquí (ver updateEstadoOrden).
+  // Toda orden nace en 'pedido_creado'. Al aprobarla (almacén) pasa a
+  // 'preparando'; para contado se abre la ventana de pago con
+  // estado_pago='esperando' — el estado logístico NO cambia por el pago
+  // (ver updateEstadoOrden / aprobarOrden en almacen.controller.js).
   const nuevaOrden = {
     usuario_id,
     estado: 'pedido_creado',
@@ -297,20 +358,18 @@ export async function getOrdenById(req, res) {
 // Mensajes de notificación por transición de estado, diferenciados por
 // forma_pago. Si una combinación no tiene mensaje especial acá, se usa
 // el genérico de LABELS_ESTADO como fallback.
-function mensajeParaTransicion(estado, forma_pago, ordenId) {
-  if (estado === 'procesando') {
-    if (forma_pago === 'contado') {
-      return `¡Tu orden #${ordenId} está lista! Ya puedes proceder con el pago.`;
-    }
-    // A crédito no se notifica el paso a 'procesando' (avanza y se
-    // encadena a 'preparando' en el mismo momento, ver abajo).
-    return null;
-  }
+function mensajeParaTransicion(estado, ordenId) {
   if (estado === 'enviado') {
     return `Tu orden #${ordenId} salió de nuestro almacén rumbo a destino.`;
   }
   if (estado === 'entregado') {
     return `Tu orden #${ordenId} fue entregada con éxito.`;
+  }
+  if (estado === 'listo_para_retiro') {
+    return `Tu orden #${ordenId} está lista para retirar en el depósito.`;
+  }
+  if (estado === 'retirado') {
+    return `Tu orden #${ordenId} fue retirada. ¡Gracias por tu compra!`;
   }
   return `Tu orden #${ordenId} cambió a: ${LABELS_ESTADO[estado] || estado}`;
 }
@@ -359,7 +418,7 @@ export async function aplicarCambioEstado(orden, estado) {
     estado
   });
 
-  const mensaje = mensajeParaTransicion(estado, data.forma_pago, data.id);
+  const mensaje = mensajeParaTransicion(estado, data.id);
   if (mensaje) {
     await crearNotificacion(data.usuario_id, 'estado_cambiado', 'Estado actualizado', mensaje, data.id);
   }
@@ -367,29 +426,11 @@ export async function aplicarCambioEstado(orden, estado) {
   return data;
 }
 
-// Aplica la bifurcación de forma de pago al entrar a 'procesando':
-// - credito: no espera pago, se encadena directo a 'preparando'
-//   (aplicarCambioEstado calcula fecha_vencimiento).
-// - contado: se abre la ventana de pago (estado_pago = 'esperando').
-// Compartido por updateEstadoOrden (admin) y aprobarOrden (almacenista).
-export async function bifurcarProcesando(orden) {
-  if (orden.forma_pago === 'credito') {
-    return aplicarCambioEstado(orden, 'preparando');
-  }
-  const { data, error } = await supabase
-    .from('ordenes')
-    .update({ estado_pago: 'esperando' })
-    .eq('id', orden.id)
-    .select()
-    .single();
-  if (error) throw error;
-  return data;
-}
-
-// GET /orders/pendientes-pago — órdenes del usuario en 'procesando' a
-// contado que están esperando o fueron rechazadas (para la pantalla de
-// gestión de pagos, individual o multi-orden). Excluye las que ya están
-// 'reportado' (esperando verificación) o 'verificado'.
+// GET /orders/pendientes-pago — órdenes del usuario a contado que están
+// esperando el pago (esperando o rechazadas) para la pantalla de gestión
+// de pagos, individual o multi-orden. Excluye las reportadas en
+// verificación ('reportado') o ya 'verificado'. La condición de pago se
+// lee de estado_pago, sin depender del estado logístico.
 export async function getOrdenesPendientesPago(req, res) {
   const usuario_id = req.user.id;
 
@@ -410,23 +451,39 @@ export async function getOrdenesPendientesPago(req, res) {
   }
 }
 
-// GET /orders/delivery-pendientes — cola de órdenes en estado 'enviado',
-// las más antiguas primero (orden de despacho). Mismo criterio que
-// getColaDespacho en staff.controller.js, expuesto también acá para el
-// panel de Admin.
+// GET /orders/delivery-pendientes — cola para el panel de delivery:
+// órdenes tipo_envio='delivery' en 'preparando' con pago autorizado
+// (crédito o estado_pago='verificado'), las más antiguas primero
+// (orden de despacho). Además devuelve los últimos 'enviado'.
+// Mismo criterio que getColaDespacho en staff.controller.js.
 export async function getDeliveryPendientes(req, res) {
   try {
-    const { data, error } = await supabase
-      .from('ordenes')
-      .select('*, users(id, nombre, email, telefono), direcciones_envio(direccion, ciudad, estado), ordenes_items(*, productos(nombre_comercial))')
-      .eq('estado', 'enviado')
-      .order('created_at', { ascending: true });
+    const selectArms = '*, users(id, nombre, email, telefono), direcciones_envio(direccion, ciudad, estado), ordenes_items(*, productos(nombre_comercial))';
 
-    if (error) throw error;
-    res.json((data || []).map(o => ({
+    const [{ data: pendientes, error: errPendientes }, { data: enviadosRecientes, error: errEnviados }] = await Promise.all([
+      supabase
+        .from('ordenes')
+        .select(selectArms)
+        .eq('estado', 'preparando')
+        .eq('tipo_envio', 'delivery')
+        .or(`forma_pago.eq.credito,estado_pago.eq.verificado`)
+        .order('created_at', { ascending: true }),
+      supabase
+        .from('ordenes')
+        .select(selectArms)
+        .eq('estado', 'enviado')
+        .order('created_at', { ascending: false })
+        .limit(10),
+    ]);
+
+    if (errPendientes || errEnviados) throw errPendientes || errEnviados;
+
+    const normalizar = (arr) => (arr || []).map((o) => ({
       ...o,
       ordenes_items: Array.isArray(o.ordenes_items) ? o.ordenes_items : []
-    })));
+    }));
+
+    res.json({ pendientes: normalizar(pendientes), enviadosRecientes: normalizar(enviadosRecientes) });
   } catch (err) {
     console.error('Error al obtener órdenes pendientes de delivery:', err);
     res.status(500).json({ error: 'Error del servidor' });
@@ -528,21 +585,18 @@ export async function updateEstadoOrden(req, res) {
       return res.status(404).json({ error: 'Orden no encontrada' });
     }
 
-    if (!validarTransicion(ordenActual.estado, estado)) {
+    if (!validarTransicion(ordenActual.estado, estado, {
+      tipo_envio: ordenActual.tipo_envio,
+      forma_pago: ordenActual.forma_pago,
+      estado_pago: ordenActual.estado_pago,
+    })) {
       return res.status(400).json({ error: `No se puede pasar de ${ordenActual.estado} a ${estado}` });
     }
 
-    let data = await aplicarCambioEstado(ordenActual, estado);
-
-    // ---------------------------------------------------------------
-    // Bifurcación crédito/contado al entrar a 'procesando' (ver helper
-    // bifurcarProcesando arriba):
-    // - credito: no espera pago, se encadena directo a 'preparando'.
-    // - contado: se abre la ventana de pago (estado_pago = 'esperando').
-    // ---------------------------------------------------------------
-    if (estado === 'procesando') {
-      data = await bifurcarProcesando(data);
-    }
+    // AplicarCambioEstado ya calcula fecha_vencimiento en 'preparando' y
+    // notifica. El pago es condición (estado_pago), no un estado logístico:
+    // nunca se bifurca el estado al verificar un pago acá.
+    const data = await aplicarCambioEstado(ordenActual, estado);
 
     res.json(data);
   } catch (err) {

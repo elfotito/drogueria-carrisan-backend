@@ -571,8 +571,11 @@ export async function getReportesPago(req, res) {
 }
 
 // PATCH /staff/contabilidad/reportes-pago/:id/verificar — verifica un
-// reporte: genera factura que salda las órdenes, crea pago, y avanza las
-// órdenes de 'procesando' a 'preparando'. created_by = req.staff.id.
+// reporte: genera factura que salda las órdenes, crea pago, y marca el
+// pago como verificado. El pago es condición (estado_pago), no estado
+// logístico: las órdenes ya están en 'preparando'. Solo las órdenes
+// LEGACY que quedaron en 'procesando' migran a 'preparando' (con su
+// evento de historial). created_by = req.staff.id.
 export async function verificarReportePago(req, res) {
   const { id } = req.params;
   const { numero_factura, nota } = req.body;
@@ -673,6 +676,18 @@ export async function verificarReportePago(req, res) {
 
     if (errorUpdateReporte) throw errorUpdateReporte;
 
+    // 8. Saber qué órdenes del reporte aún están en 'procesando' (legacy)
+    //    para migrarlas a 'preparando' con su evento de historial. Las que
+    //    ya están en 'preparando' solo cambian estado_pago (condición de
+    //    pago, no estado logístico).
+    const { data: ordenesActuales, error: errorEstados } = await supabase
+      .from('ordenes')
+      .select('id, estado')
+      .in('id', orden_ids);
+    if (errorEstados) throw errorEstados;
+
+    const enProcesando = (ordenesActuales || []).filter(o => o.estado === 'procesando');
+
     const { error: errorUpdatePagoOrdenes } = await supabase
       .from('ordenes')
       .update({ estado_pago: 'verificado' })
@@ -680,18 +695,18 @@ export async function verificarReportePago(req, res) {
 
     if (errorUpdatePagoOrdenes) throw errorUpdatePagoOrdenes;
 
-    for (const orden_id of orden_ids) {
+    for (const orden of enProcesando) {
       const { error: errorUpdateEstado } = await supabase
         .from('ordenes')
         .update({ estado: 'preparando' })
-        .eq('id', orden_id);
+        .eq('id', orden.id);
 
       if (errorUpdateEstado) throw errorUpdateEstado;
 
       const { error: errorHistorial } = await supabase
         .from('ordenes_historial')
         .insert({
-          orden_id,
+          orden_id: orden.id,
           estado: 'preparando',
         });
 
@@ -702,7 +717,7 @@ export async function verificarReportePago(req, res) {
       reporte.usuario_id,
       'pago_verificado',
       'Pago verificado',
-      `Tu pago fue verificado. ${orden_ids.length === 1 ? `Tu orden #${orden_ids[0]} está` : `Tus órdenes ${orden_ids.map(o => `#${o}`).join(', ')} están`} pasando a preparación.`,
+      `Tu pago fue verificado. ${orden_ids.length === 1 ? `Tu orden #${orden_ids[0]}` : `Tus órdenes ${orden_ids.map(o => `#${o}`).join(', ')}`} continúa su preparación.`,
       null
     );
 
@@ -786,17 +801,18 @@ export async function rechazarReportePago(req, res) {
 // CUENTAS POR COBRAR (tab "Por cobrar")
 // ---------------------------------------------------------------
 
-// GET /staff/contabilidad/ordenes-procesando — órdenes contado en
-// 'procesando' que esperan el reporte de pago del cliente ('esperando')
-// o están a la espera de verificación ('reportado'). Desde aquí
-// contabilidad puede cancelarlas.
+// GET /staff/contabilidad/ordenes-procesando — órdenes contado que esperan
+// el reporte de pago del cliente ('esperando') o están a la espera de
+// verificación ('reportado'). Desde aquí contabilidad puede cancelarlas.
+// El estado logístico es 'preparando' (antes 'procesando', legacy): la
+// condición de pago se lee de estado_pago, no del estado de la orden.
 export async function getOrdenesProcesando(req, res) {
   try {
     const { data, error } = await supabase
       .from('ordenes')
       .select('*, users(id, nombre, email, telefono), ordenes_items(*, productos(nombre_comercial))')
       .eq('forma_pago', 'contado')
-      .eq('estado', 'procesando')
+      .in('estado', ['preparando', 'procesando'])
       .in('estado_pago', ['esperando', 'reportado'])
       .order('created_at', { ascending: true });
 
@@ -808,8 +824,9 @@ export async function getOrdenesProcesando(req, res) {
   }
 }
 
-// PATCH /staff/contabilidad/ordenes/:id/cancelar — cancela una orden en
-// 'procesando' (esperando o con pago reportado aún sin verificar).
+// PATCH /staff/contabilidad/ordenes/:id/cancelar — cancela una orden de
+// contado en preparación ('preparando'; legacy 'procesando') cuyo pago aún
+// no está verificado (esperando/reportado).
 export async function cancelarOrdenProcesando(req, res) {
   const { id } = req.params;
 
@@ -823,8 +840,11 @@ export async function cancelarOrdenProcesando(req, res) {
     if (error || !orden) {
       return res.status(404).json({ error: 'Orden no encontrada' });
     }
-    if (orden.estado !== 'procesando') {
-      return res.status(400).json({ error: `Solo se puede cancelar una orden en procesando (estado actual: ${orden.estado})` });
+    if (!['preparando', 'procesando'].includes(orden.estado)) {
+      return res.status(400).json({ error: `Solo se puede cancelar una orden en preparación pendiente de pago (estado actual: ${orden.estado})` });
+    }
+    if (orden.forma_pago !== 'contado' || !['esperando', 'reportado'].includes(orden.estado_pago)) {
+      return res.status(400).json({ error: 'Solo se pueden cancelar órdenes de contado cuyo pago no fue verificado' });
     }
     if (!validarTransicion(orden.estado, 'cancelado')) {
       return res.status(400).json({ error: 'No se puede cancelar esta orden' });
