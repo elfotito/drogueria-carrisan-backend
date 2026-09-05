@@ -72,10 +72,11 @@ function bodyBusqueda(take) {
 async function buscarProductos(cookie, take, intentos = 3) {
   for (let intento = 1; intento <= intentos; intento++) {
     try {
-      const res = await axios.post(`${BASE}/api/productos-farma`, bodyBusqueda(take), {
+      const res = await axios.post(`${BASE}/api/productos-farma`, JSON.stringify(bodyBusqueda(take)), {
         headers: {
           ...HEADERS_BASE,
-          'Content-Type': 'application/json',
+          'Content-Type': 'text/plain;charset=UTF-8', // el navegador manda así, no application/json
+          Origin: 'https://inhrr.gob.ve',
           Referer: `${BASE}/productos-farma`,
           Cookie: cookie,
         },
