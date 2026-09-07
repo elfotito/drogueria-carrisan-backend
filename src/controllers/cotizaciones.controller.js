@@ -135,6 +135,7 @@ export async function responderCotizacion(req, res) {
         fecha_cotizacion: ahora.toISOString(),
         fecha_expiracion: expiracion.toISOString(),
         updated_at: ahora.toISOString(),
+        staff_id: req.staff?.id ?? null,
       })
       .eq('id', id)
       .select()
@@ -179,7 +180,7 @@ export async function rechazarCotizacion(req, res) {
 
     const { data, error } = await supabase
       .from('cotizaciones')
-      .update({ estado: 'rechazada', nota_admin: nota_admin || null, updated_at: new Date().toISOString() })
+      .update({ estado: 'rechazada', nota_admin: nota_admin || null, updated_at: new Date().toISOString(), staff_id: req.staff?.id ?? null })
       .eq('id', id)
       .select()
       .single();

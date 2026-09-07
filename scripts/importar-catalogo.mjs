@@ -79,7 +79,8 @@ const SALES = ['clorhidrato', 'diclorhidrato', 'hidrocloruro', 'bromhidrato', 'h
   'fumarato', 'maleato', 'tartrato', 'succinato', 'acetato', 'sodico', 'sodica', 'sodio', 'disodico', 'disodio',
   'potasico', 'potasica', 'potasio', 'calcico', 'calcica', 'calcio', 'fosfato', 'pamoato', 'nitrato', 'edetato',
   'estearato', 'carbonato', 'bicarbonato', 'gluconato', 'lactato', 'silicio', 'anhidro', 'anhidra', 'monobasico',
-  'dibasico', 'micronizado', 'micronizada', 'acido', 'acida', 'ferroso', 'ferrosa', 'ferrico', 'ferrica'];
+  'dibasico', 'micronizado', 'micronizada', 'acido', 'acida', 'ferroso', 'ferrosa', 'ferrico', 'ferrica',
+  'bromuro', 'cloruro', 'yoduro', 'fluoruro'];
 const STOP_SET = `('${STOPWORDS.join("', '")}')`;
 const SALT_SET = `('${SALES.join("', '")}')`;
 
@@ -182,7 +183,13 @@ await connection.run(`CREATE OR REPLACE TEMP TABLE catalogo_agrupado AS ${PRODUC
 
 await connection.run(`
   CREATE OR REPLACE TEMP TABLE catalogo_full AS
-  WITH c AS (SELECT * FROM catalogo_agrupado WHERE rn_name = 1 OR grp_distinct = grp_n)
+  WITH c AS (
+    SELECT ef, sort_id, nombre, forma, categoria, principioActivo, representante,
+           rifRepresentante, patrocinante, fabricante, fechaAprobado, fechaVigencia,
+           fechaCancelado, n, rn_name, grp_n, grp_distinct
+    FROM catalogo_agrupado
+    WHERE rn_name = 1 OR grp_distinct = grp_n
+  )
   SELECT *, row_number() OVER (PARTITION BY categoria, sort_id ORDER BY ef) AS rn,
     CASE
       WHEN row_number() OVER (PARTITION BY categoria, sort_id ORDER BY ef) = 1 THEN categoria || sort_id
@@ -205,9 +212,9 @@ console.table(stats.getRowObjects());
 await connection.run(`COPY (
   SELECT ef, sort_id, sku, nombre, forma, categoria, principioActivo AS principio_activo,
          representante, rifRepresentante AS rif_representante, patrocinante, fabricante,
-         NULLIF(fechaAprobado, '') AS fecha_aprobado,
-         NULLIF(fechaVigencia, '') AS fecha_vigencia,
-         NULLIF(fechaCancelado, '') AS fecha_cancelado
+         strftime(try_cast(NULLIF(fechaAprobado, '') AS TIMESTAMP), '%Y-%m-%d') AS fecha_aprobado,
+         strftime(try_cast(NULLIF(fechaVigencia, '') AS TIMESTAMP), '%Y-%m-%d') AS fecha_vigencia,
+         strftime(try_cast(NULLIF(fechaCancelado, '') AS TIMESTAMP), '%Y-%m-%d') AS fecha_cancelado
   FROM catalogo_full
   ORDER BY categoria, sort_id, ef
 ) TO '${OUT.productos}' (HEADER, DELIMITER ',')`);
@@ -310,7 +317,7 @@ await connection.run(`
     SELECT mol_inhrr, ref_base, score,
       row_number() OVER (PARTITION BY mol_inhrr ORDER BY score DESC, ref_base) AS rn
     FROM mol_scored
-    WHERE score >= 0.85
+    WHERE score >= 0.9
   ) x WHERE rn = 1
 `);
 
@@ -321,8 +328,8 @@ await connection.run(`
     SELECT mol_inhrr, ref_base, score,
       row_number() OVER (PARTITION BY mol_inhrr ORDER BY score DESC, ref_base) AS rn
     FROM mol_scored
-    WHERE score >= 0.75 AND score < 0.85
-  ) x WHERE rn = 1
+    WHERE score >= 0.75 AND score < 0.9
+  ) x WHERE rn = 1 AND mol_inhrr NOT IN (SELECT mol_inhrr FROM mol_resolved)
 `);
 
 const matchStats = (await connection.runAndReadAll(`
@@ -335,7 +342,7 @@ console.log('match: con =', matchStats.con_match.toString(), '| sin =', matchSta
 
 await connection.run(`
   COPY (
-    SELECT m.ef, m.mol_inhrr, r.mol_cima, r.score
+    SELECT DISTINCT m.ef, m.mol_inhrr, r.mol_cima, r.score
     FROM mols_inhrr m
     JOIN mol_resolved r ON r.mol_inhrr = m.mol_inhrr
     ORDER BY m.ef, r.score DESC

@@ -3,6 +3,11 @@ import jwt from 'jsonwebtoken';
 import { supabase } from '../config/supabase.js';
 import { verificarTurnstile } from '../utils/turnstile.js';
 import { validarTransicion, aplicarCambioEstado, construirOrden, ErrorOrden } from './ordenes.controller.js';
+import {
+  construirPresupuesto,
+  resolverDetallePresupuesto,
+  recotizarPresupuestoPorId,
+} from './presupuestos.controller.js';
 
 // POST /staff/login
 export async function loginStaff(req, res) {
@@ -290,6 +295,166 @@ export async function crearOrdenParaCliente(req, res) {
     console.error('Error al crear orden como vendedor:', err);
     if (err.code === '23505') return res.status(409).json({ error: 'Conflicto de datos' });
     if (err.code === '23503') return res.status(400).json({ error: 'Referencia inválida' });
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
+// GET /staff/clientes/:id/presupuestos — historial de presupuestos de un
+// cliente puntual, incluyendo tanto los que el propio cliente se creo
+// (self-service) como los que genero un vendedor a su nombre.
+export async function getPresupuestosDeCliente(req, res) {
+  const { id } = req.params;
+
+  try {
+    const { data, error } = await supabase
+      .from('presupuestos')
+      .select('id, numero, estado, fecha_creacion, fecha_expiracion, total_usd, creado_por_staff_id, orden_generada_id')
+      .eq('usuario_id', id)
+      .order('fecha_creacion', { ascending: false });
+
+    if (error) throw error;
+
+    res.json(data || []);
+  } catch (err) {
+    console.error('Error al obtener presupuestos del cliente:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
+// POST /staff/presupuestos — un vendedor crea un presupuesto a nombre de
+// un cliente ya registrado. Reutiliza construirPresupuesto (misma
+// resolucion de precios/disponibilidad que el self-service del cliente)
+// dejando creado_por_staff_id para trazabilidad.
+export async function crearPresupuestoParaCliente(req, res) {
+  const { usuario_id, items } = req.body;
+
+  if (!usuario_id) {
+    return res.status(400).json({ error: 'Debes indicar el cliente para el que se crea el presupuesto' });
+  }
+
+  try {
+    const { data: cliente, error: errorCliente } = await supabase
+      .from('users')
+      .select('id, activo')
+      .eq('id', usuario_id)
+      .single();
+
+    if (errorCliente || !cliente) {
+      return res.status(404).json({ error: 'Cliente no encontrado' });
+    }
+    if (!cliente.activo) {
+      return res.status(403).json({ error: 'El cliente está desactivado' });
+    }
+
+    const presupuesto = await construirPresupuesto(
+      usuario_id,
+      { items },
+      { creado_por_staff_id: req.staff.id }
+    );
+
+    res.status(201).json(presupuesto);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('Error al crear presupuesto como vendedor:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
+// GET /staff/presupuestos/:id — detalle, sin restriccion de dueño (solo
+// el guard de rol en la ruta).
+export async function getPresupuestoStaff(req, res) {
+  const { id } = req.params;
+
+  try {
+    const detalle = await resolverDetallePresupuesto(id);
+
+    if (!detalle) {
+      return res.status(404).json({ error: 'Presupuesto no encontrado' });
+    }
+
+    res.json(detalle);
+  } catch (err) {
+    console.error('Error al obtener presupuesto (staff):', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
+// POST /staff/presupuestos/:id/recotizar
+export async function recotizarPresupuestoStaff(req, res) {
+  const { id } = req.params;
+
+  try {
+    const { data: anterior, error: errorAnterior } = await supabase
+      .from('presupuestos')
+      .select('id, usuario_id')
+      .eq('id', id)
+      .single();
+
+    if (errorAnterior || !anterior) {
+      return res.status(404).json({ error: 'Presupuesto no encontrado' });
+    }
+
+    const nuevo = await recotizarPresupuestoPorId(id, anterior.usuario_id, {
+      creado_por_staff_id: req.staff.id,
+    });
+
+    res.status(201).json(nuevo);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('Error al recotizar presupuesto (staff):', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
+// POST /staff/presupuestos/:id/generar-pedido — convierte un presupuesto
+// vigente en un pedido real via construirOrden (misma validacion de
+// credito/stock que el checkout normal). Rechaza si esta vencido: el
+// vendedor debe recotizar primero para tener precios/disponibilidad
+// actuales. Marca el presupuesto como 'convertido' y guarda
+// orden_generada_id para trazabilidad.
+export async function generarPedidoDesdePresupuesto(req, res) {
+  const { id } = req.params;
+  const { forma_pago, tipo_envio, direccion_envio_id, agencia_envio } = req.body;
+
+  try {
+    const detalle = await resolverDetallePresupuesto(id);
+
+    if (!detalle) {
+      return res.status(404).json({ error: 'Presupuesto no encontrado' });
+    }
+    if (detalle.estado === 'convertido') {
+      return res.status(409).json({ error: 'Este presupuesto ya fue convertido en pedido' });
+    }
+    if (detalle.vencido) {
+      return res.status(409).json({ error: 'El presupuesto está vencido. Recotízalo antes de generar el pedido' });
+    }
+
+    const itemsDisponibles = detalle.items.filter((i) => i.disponible);
+    if (itemsDisponibles.length === 0) {
+      return res.status(400).json({ error: 'Ningún producto del presupuesto está disponible actualmente' });
+    }
+
+    const items = itemsDisponibles.map((i) => ({ producto_id: i.producto_id, cantidad: i.cantidad }));
+
+    const orden = await construirOrden(
+      detalle.usuario_id,
+      { items, forma_pago, tipo_envio, direccion_envio_id, agencia_envio },
+      { creado_por_staff_id: req.staff.id, saltarValidacionPin: true }
+    );
+
+    const { error: errorUpdate } = await supabase
+      .from('presupuestos')
+      .update({ estado: 'convertido', orden_generada_id: orden.id })
+      .eq('id', id);
+
+    if (errorUpdate) throw errorUpdate;
+
+    res.status(201).json(orden);
+  } catch (err) {
+    if (err instanceof ErrorOrden) {
+      return res.status(err.status).json({ error: err.message, ...(err.extra || {}) });
+    }
+    console.error('Error al generar pedido desde presupuesto:', err);
     res.status(500).json({ error: 'Error del servidor' });
   }
 }

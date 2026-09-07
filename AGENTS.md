@@ -89,7 +89,19 @@ Login aparte para trabajadores de la empresa (vendedores, despachadores, almacen
 - Frontend: `src/pages/staff/` (StaffLogin, StaffDashboard, StaffAlmacen, StaffDespacho, StaffOrdenes, StaffVentas, StaffCuentasPorCobrar, StaffPagos, StaffOrdenesPorCancelar), `src/components/staff/` (LayoutStaff + NavStaff, sidebar persistente), `src/context/StaffAuthContext.jsx`, `src/api/staffAxios.js` (token propio `staff_token`, sesion independiente de la de cliente), `src/components/PrivateRouteStaff.jsx`.
 - **Orden de montaje en `server.js`**: `/staff/almacen` y `/staff/contabilidad` se montan ANTES de `/staff` (llegan antes que el router base).
 
-**Importante**: la tabla `staff` y la columna `ordenes.creado_por_staff_id` NO existen en una BD sin ejecutar la migracion `008_staff.sql`; los roles nuevos (`almacenista`, `contabilidad`, `director`) no funcionan sin `009_roles_staff.sql`. El módulo de aprobación (ajustar cantidades / anular items) no funciona sin `010_ordenes_items_anulado.sql`, y las notas de crédito/débito de Ventas no funcionan sin `012_facturas_tipo_notas.sql`.
+**Migración Admin → Staff (IMPLEMENTADA — 2026-09-07)** — funcionalidades del panel `/admin` migradas a módulos staff con endpoints **NUEVOS** `/staff/*` (sesión staff). Las rutas están en `routes/staff.{modulo}.routes.js` y se montan en `server.js` ANTES del `/staff` base, usando `verifyStaffJWT` + `checkRolStaff([...])`. NO se reutilizan ni modifican los controllers/endpoints de `/admin`:
+
+| Módulo | Roles | Endpoints |
+|--------|-------|----------|
+| **Cotizaciones** (Comercial) | `vendedor/administrador/director/admin` | `GET /staff/cotizaciones`, `PATCH /staff/cotizaciones/:id/responder`, `PATCH /staff/cotizaciones/:id/rechazar` |
+| **Requerimientos** (Comercial) | `vendedor/administrador/director/admin` | `GET /staff/requerimientos`, `PATCH /staff/requerimientos/:id/responder` |
+| **Documentos** (Comercial) | `vendedor/administrador/director/admin` | `GET /staff/documentos`, `PATCH /staff/documentos/:id/aprobar`, `PATCH /staff/documentos/:id/rechazar` |
+| **Promociones** (Comercial, sin envío masivo) | `vendedor/administrador/director/admin` | `GET/POST/PUT/DELETE /staff/promociones/templates`, `GET /staff/promociones/history`. El envío masivo (`send`/`send-custom`) queda SOLO en `/admin` (solo el dueño) |
+| **Direcciones** (Logística) | `despachador/administrador/director/admin` | `GET /staff/direcciones` (con info del cliente), `GET /staff/direcciones/cliente/:id` |
+
+Los 5 módulos están IMPLEMENTADOS (los controllers reutilizados de `cotizaciones.controller.js`, `requerimientos.controller.js`, `documentos.controller.js`, `promociones.controller.js`) expuestos bajo `/staff/*` con sesión staff. Auditoría de acciones staff con **`staff_id`** (migración `015_staff_auditoria.sql`): los controllers reutilizados registran `staff_id: req.staff?.id ?? null` — en `/admin` (sesión cliente) `req.staff` es `undefined` y queda `null`, así que el comportamiento admin se mantiene intacto.
+
+**Importante**: la tabla `staff` y la columna `ordenes.creado_por_staff_id` NO existen en una BD sin ejecutar la migracion `008_staff.sql`; los roles nuevos (`almacenista`, `contabilidad`, `director`) no funcionan sin `009_roles_staff.sql`. El módulo de aprobación (ajustar cantidades / anular items) no funciona sin `010_ordenes_items_anulado.sql`, y las notas de crédito/débito de Ventas no funcionan sin `012_facturas_tipo_notas.sql`. La auditoría `staff_id` de la migración `015_staff_auditoria.sql` (FK a `staff(id)` con `ON DELETE SET NULL` + tabla `promociones_plantillas_eliminadas`) no existe sin ejecutarla a mano en Supabase SQL Editor.
 
 ### Pipeline de estados de órdenes (relevante para staff)
 
@@ -135,13 +147,38 @@ Objetivo: crear un catálogo público de consulta (`productos_catalogo`) basado 
 - **Categorización**: usar fuzzy matching (pg_trgm) contra keywords, NO `position()` exacto, porque el INHRR tiene typos (UNGUUUENTO, COMPRMIDOS, SUSPENCION, JERIRGA, INYECATBLE). Además: normalizar acentos (también `ü`→u, `ó`→o). El matching se hace TOKEN a TOKEN (cada palabra del `nombre` contra las keywords), no contra el nombre completo. `JERINGA PRELLENADA` con medicamento → **HO** (EPREX, BOOSTRIX); MM solo para material puro (gasas, algodón, guantes — SIN keywords tipo sonda/sutura/venda/catéter porque falsean positivos en nombres de medicamentos). Mejorar reglas para: inhaladores/aerosol (ME), `POLVO LIOFILIZADO` (HO/ME según contexto `para suspension`→ME), `ANILLO VAGINAL`, `SOLUCION OTICA`, `GRANULADO`, `SOLUCION ELECTROLITICA USO ORAL` (ME).
 - **Colisiones de SKU (analizado 2026-09-05)**: como `E.F`, `E.F.G`, `P.B`, `P.F`, `P.F.G` comparten la misma numeración, hay **10 grupos** donde un mismo número cae en la misma categoría tras la purga (HO931, HO990, HO1102, HO1161, HO1184, HO1370, ME1406, HO1466, ME42605, ME43668). 1 es duplicado real del mismo producto (SEMGLEE → `E.F.1.466` y `P.B.1.466`), el resto son productos distintos (ej. MABTHERA vs AGUA DESTILADA en `HO931`). **Resolución (decisión del dueño 2026-09-05): suffix A/B determinístico** — dentro de un grupo `(categoría, número)`, si el `nombre` normalizado es idéntico se fusiona (queda el registro con `ef` menor, ej. SEMGLEE → solo `E.F.1.466`), y si son productos distintos el primero por orden de `ef` conserva el SKU base (`HO931`) y los demás reciben sufijo de letra (`HO931B`, `HO931C`). La regla es estable entre re-importaciones porque el `ef` no cambia.
 
-**Fases pendientes:**
-1. `scripts/importar-catalogo.mjs` — script DuckDB (`@duckdb/node-api`, ya instalado): lee CSV, purga vencidos, infiere categoría, genera SKU, separa principioActivo, exporta limpio. NO leer el CSV directamente (regla de la skill `big-data-sql`).
-2. `src/migrations/014_productos_catalogo.sql` — tablas `productos_catalogo` + `catalogo_moleculas` (bridge N:N con `moleculas_referencias`), índices GIN para nombre (pg_trgm) y búsqueda.
-3. `src/controllers/catalogo.controller.js` — `getCatalogo` (lista paginada + filtros: `q`, `molecula`, `laboratorio`, `forma`, `categoria`), `getProductoCatalogo` (ficha), `getCatalogoMetadata` (valores distintos para filtros).
-4. `src/routes/catalogo.routes.js` — montar `/catalogo` en `server.js` (público, sin auth).
-5. Frontend: `Catalogo.jsx` + componentes de filtros/tarjetas/ficha en `/catalogo`.
-6. Ejecutar migración en Supabase + correr el script de importación.
+**Estado de implementación (2026-09-05)**: fases 1-4 COMPLETAS, el resto pendiente:
+
+1. **`scripts/importar-catalogo.mjs`** (IMPLEMENTADO) — script DuckDB (`@duckdb/node-api`): lee el CSV, purga vencidos (CUTOFF `2026-09-05`), infiere categoría y forma farmacéutica por token-a-token con levenshtein, genera SKU con dedupe/sufijos A/B (determinístico por `ef`), separa `principioActivo` por `" - "` y hace match fuzzy de moléculas contra `moleculas_referencias`. Salidas en `data/`: `catalogo_productos_import.csv` (7,416: ME 5,845 / HO 1,461 / MI 109 / MM 1; 8 colisiones con sufijo; 1 duplicado fusionado SEMGLEE→`HO1466`), `catalogo_moleculas_import.csv` (bridge ef→molécula: 775 de 928 moléculas distintas auto-enlazadas con score ≥ 0.90), `catalogo_moleculas_revisar.csv` (banda 0.75–0.90 sin resolver, 39 pares para el dueño), `catalogo_moleculas_no_match.csv` (114 sin match), `catalogo_duplicados_omitidos.csv`.
+
+    **Matching de moléculas**: CIMA usa formas masculinas (`Amlodipino` vs `AMLODIPINA`), así que el match es similitud levenshtein token-a-token con **stopwords y sales filtradas** (`clorhidrato`, `sodico`, `acido`, `hidratado`, `bromuro`, etc. se ignoran en ambos lados) y umbral 0.90 (auto) / 0.75–0.90 (revisión, solo si la molécula NO quedó resuelta). El score = suma de mejores similitudes por token / `max(tokens mol, tokens ref)` y normaliza acentos con `translate`. No usar `strsim` (DuckDB no lo tiene); sí `levenshtein`/`editdist3`. Los 114 `no_match` y los 39 `revisar` los revisa el dueño (excepciones manuales).
+
+    **Cómo aplicar los resultados de la revisión**: cuando el dueño termine de revisar, me pasa las dos listas corregidas y se integran como **mapa manual** dentro de `scripts/importar-catalogo.mjs` (no por edición directa en la BD): un CTE `overrides(mol_inhrr, mol_cima)` que se aplica DESPUÉS del fuzzy match y antes de exportar. Así la regla sobrevive a futuras re-importaciones. Si una molécula decide enlazarla pero NO existe en `moleculas_referencias`, se inserta primero (migración/SQL: nombre + `atc` si se conoce) y luego se agrega el override.
+
+    ### REVISIÓN MANUAL DE MOLÉCULAS (qué debe revisar el dueño)
+
+    **Objetivo**: convalidar los enlaces automáticos dudosos y decidir qué hacer con las moléculas que no encontraron candidato. NO se toca la BD ni los CSVs de import directo — las decisiones se me pasan como listas corregidas para integrarlas como overrides en el script.
+
+    **1ª ronda — `data/catalogo_moleculas_revisar.csv` (39 pares, score 0.75–0.90)**
+    Columnas: `mol_inhrr` (molécula tal cual la escribió el INHRR), `mol_cima` (¿candidato? que eligió el fuzzy match contra `moleculas_referencias`), `score` (similitud), `veces` (¿en cuántos productos aparece).
+    Por cada fila, la pregunta es: **¿`mol_cima` es realmente la misma molécula que `mol_inhrr`?**
+    - **SÍ** → es una sal/variante/sinónimo válido → el enlace es correcto y se deja tal cual. Ejemplos del propio archivo: `KETOROLAC TROMETAMINA → Ketorolaco Trometamol`, `DICLOFENAC DIETILAMONIO → Diclofenaco Dietilamina`, `HIALURONATO DE SODIO → Hialuronico Acido`.
+    - **NO** → el score alto es un falso positivo tipográfico y hay que corregirlo dando la molécula EXACTA que sí existe en `moleculas_referencias`. Falsos positivos reales del archivo: `BROMURO DE VECURONIO→Rocuronio` (correcto: *Vecuronio*), `DESONIDA→Budesonida`, `CEFALOTINA→Cefalexina`, `BENZOATO DE BENCILO→Benzoato Sodio`, `OXACILINA→Cloxacilina`, `DICLOXACILINA→Cloxacilina`, `ISOCONAZOL→Tioconazol` (correcto: *Isoconazol*), `SIBUTRAMINA→Bisibutiamina`, `SUBCARBONATO DE BISMUTO→Bismuto Subcitrato` (subcarbonato≠subcitrato), `OXOLAMINA CITRATO→Doxilamina`.
+    Nota: priorizar las filas con score más bajo y con `veces` alto (impactan más productos). Si no está seguro del nombre correcto, se puede consultar la lista de `moleculas_referencias` (4,232) — p.ej. vía la tabla en la BD o el frontend del vademécum.
+
+    **2ª ronda — `data/catalogo_moleculas_no_match.csv` (114, sin candidato ≥ 0.75)**
+    Columnas: `mol_inhrr` (molécula del INHRR), `veces` (cuántos productos la usan).
+    Se agrupan en dos tipos:
+    - **Electrolitos/soluciones/excipientes que SÍ son activos** (p.ej. `CLORURO DE SODIO`, `CLORURO DE POTASIO`, `CARBONATO DE CALCIO`, `LACTATO DE SODIO`, `BICARBONATO DE SODIO`, `SULFADIAZINA DE PLATA`, `N-BUTILBROMURO DE HIOSCINA`, `CLENBUTEROL`, `SUCRALFATO`, `SULTAMICILINA`, `CIPROFIBRATO`): decidir si deben quedar **enlazadas** en el catálogo o **ignorarse**. Si se enlazan y no están en `moleculas_referencias`, hay que insertarlas primero (ver "cómo aplicar").
+    - **Excipientes puros que no aportan a la consulta** (p.ej. `AGUA DESTILADA`, sales simples de medios de contraste…): se dejan **sin enlazar**. El producto igualmente se muestra en el catálogo (nombre, forma, laboratorio), solo sin ficha de molécula/ATC.
+    Entregar, por cada `mol_inhrr` mantenido, la decisión: `enlazar → nombre exacto en moleculas_referencias` (o `nuevo → insertar`) o `ignorar`.
+
+    **Impacto en el frontend**: los productos **enlazados** muestran molécula + ATC (ficha completa y filtro por molécula). Los **sin enlazar** solo aparecen con los datos del registro (SKU, nombre, forma, categoría, laboratorio) sin filtro de molécula. La revisión NO bloquea la fase 5.
+2. **`src/migrations/014_productos_catalogo.sql`** (IMPLEMENTADO) — tablas `productos_catalogo` + `catalogo_moleculas` (bridge N:N con `moleculas_referencias`), índices GIN pg_trgm (nombre y laboratorio), RLS lectura pública, vista `v_catalogo_productos` (moléculas + ATC agregados) y RPC plpgsql `catalogo_listar` (pag + filtros q/categoria/forma/laboratorio/molecula), `catalogo_producto(p_sku)`, `catalogo_metadata`. Ejecutar primero, luego `scripts/cargar-catalogo.sql`.
+3. **`src/controllers/catalogo.controller.js`** (IMPLEMENTADO) — `getCatalogo` (lista paginada + filtros, llama `catalogo_listar`), `getProductoCatalogo` (ficha por sku), `getCatalogoMetadata`.
+4. **`src/routes/catalogo.routes.js`** (IMPLEMENTADO) — montado en `server.js` como `/catalogo` (público, sin auth; ya lo cubre `apiLimiter` global).
+5. **Frontend** ✅ (COMPLETADO 2026-09-07): `RegistroInhrr.jsx` en la ruta pública **`/registro-inhrr`** (listado + buscador + filtros + ficha modal por SKU). ENLACES: `Footer.jsx` ("Registro sanitario (INHRR)") y `MenuDrawer.jsx`. NO tocar `/catalogo` de la tienda (otra página). Ver `analisis/plan-vademecum-inhrr-pages.md`.
+6. **Carga en Supabase** (COMPLETADA 2026-09-05): migración 014 ejecutada, `scripts/cargar-catalogo.sql` cargado → **7,416 productos** activos, **6,149 con molécula enlazada**. RPCs verificados (`catalogo_metadata`, `catalogo_listar`, `catalogo_producto`). Nota: `cargar-catalogo.sql` es idempotente (upsert por `ef`, desactiva los que desaparecen en re-importaciones).
 
 ### Rate Limiting (5 limiters)
 
@@ -192,6 +229,8 @@ Las migraciones son SQL plano. NO hay sistema de migraciones automatico — se e
 | 011_codigos_invitacion_tipo_staff.sql | Códigos de invitación: columnas `tipo` ('honorifico'\|'staff') + `rol_staff` para códigos de staff |
 | 012_facturas_tipo_notas.sql | Facturas: columnas `tipo` ('factura'\|'nota_credito'\|'nota_debito'), `factura_referencia_id` y `motivo` para notas de crédito/débito (Ventas) |
 | 013_poblarvademecum.sql | Poblado masivo de `atc_clasificaciones` (7,353 códigos ATC, árbol niveles 1-5) y `moleculas_referencias` (4,232 moléculas) desde CSVs de `data/` con resolución padre-hijo |
+| 014_productos_catalogo.sql | Catálogo público INHRR: tablas `productos_catalogo` + `catalogo_moleculas`, índices GIN pg_trgm, RLS lectura pública, vista `v_catalogo_productos` y RPC `catalogo_listar`/`catalogo_producto`/`catalogo_metadata` |
+| 015_staff_auditoria.sql | Auditoría Admin→Staff: columna `staff_id` UUID (FK `staff(id)`, `ON DELETE SET NULL`) en `cotizaciones`, `solicitudes_documentos`, `requerimientos`, `promociones_plantillas` + tabla `promociones_plantillas_eliminadas` para auditar eliminaciones de plantillas |
 
 **NOTA**: Las migraciones 002-009 ya NO existen como archivos (fueron consolidadas/aplicadas directamente en Supabase). La tabla principal `users` tampoco esta en estas migraciones — fue creada directamente en Supabase. Si necesitas ver su schema, busca las queries en los controllers (especialmente auth.controller.js y users.controller.js).
 

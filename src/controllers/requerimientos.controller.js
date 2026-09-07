@@ -157,7 +157,7 @@ export async function responderRequerimiento(req, res) {
 
     const { data: requerimientoActualizado, error: errorUpdateReq } = await supabase
       .from('requerimientos')
-      .update({ estado: 'respondido', fecha_respuesta: new Date().toISOString() })
+      .update({ estado: 'respondido', fecha_respuesta: new Date().toISOString(), staff_id: req.staff?.id ?? null })
       .eq('id', id)
       .select('*, requerimiento_items(*, productos(id, nombre_comercial, foto_url, precio_usd))')
       .single();

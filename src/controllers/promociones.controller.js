@@ -28,7 +28,7 @@ export async function crearPlantilla(req, res) {
   try {
     const { data, error } = await supabase
       .from('promociones_plantillas')
-      .insert({ titulo, mensaje, descuento_pct, codigo_cupon, imagen_url })
+      .insert({ titulo, mensaje, descuento_pct, codigo_cupon, imagen_url, staff_id: req.staff?.id ?? null })
       .select()
       .single();
 
@@ -53,6 +53,7 @@ export async function actualizarPlantilla(req, res) {
     if (codigo_cupon !== undefined) updates.codigo_cupon = codigo_cupon;
     if (imagen_url !== undefined) updates.imagen_url = imagen_url;
     if (activa !== undefined) updates.activa = activa;
+    updates.staff_id = req.staff?.id ?? null;
 
     const { data, error } = await supabase
       .from('promociones_plantillas')
@@ -74,12 +75,38 @@ export async function eliminarPlantilla(req, res) {
   const { id } = req.params;
 
   try {
+    const { data: plantilla, error: errorPlantilla } = await supabase
+      .from('promociones_plantillas')
+      .select('id, titulo, mensaje, descuento_pct, codigo_cupon')
+      .eq('id', id)
+      .single();
+
+    if (errorPlantilla || !plantilla) {
+      return res.status(404).json({ error: 'Plantilla no encontrada' });
+    }
+
     const { error } = await supabase
       .from('promociones_plantillas')
       .delete()
       .eq('id', id);
 
     if (error) throw error;
+
+    // Auditoría: la fila original ya no existe, se preserva quién la eliminó
+    // (staff_id). Si viene del /admin (sesión cliente) staff_id queda null.
+    try {
+      await supabase.from('promociones_plantillas_eliminadas').insert({
+        plantilla_id: plantilla.id,
+        titulo: plantilla.titulo,
+        mensaje: plantilla.mensaje,
+        descuento_pct: plantilla.descuento_pct,
+        codigo_cupon: plantilla.codigo_cupon,
+        staff_id: req.staff?.id ?? null,
+      });
+    } catch (errAudit) {
+      console.error('Error al registrar auditoría de plantilla eliminada:', errAudit);
+    }
+
     res.json({ ok: true });
   } catch (err) {
     console.error('Error al eliminar plantilla:', err);

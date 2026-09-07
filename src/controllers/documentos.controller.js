@@ -178,6 +178,7 @@ export async function aprobarSolicitudDocumento(req, res) {
         estado: 'aprobada',
         nota_admin: nota_admin || null,
         fecha_respuesta: new Date().toISOString(),
+        staff_id: req.staff?.id ?? null,
       })
       .eq('id', id)
       .select()
@@ -225,6 +226,7 @@ export async function rechazarSolicitudDocumento(req, res) {
         estado: 'rechazada',
         nota_admin: nota_admin || null,
         fecha_respuesta: new Date().toISOString(),
+        staff_id: req.staff?.id ?? null,
       })
       .eq('id', id)
       .select()
