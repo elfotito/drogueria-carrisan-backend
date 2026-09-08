@@ -59,7 +59,7 @@ function escribirCsvTexto(filas) {
 
 // ---- Lectura del archivo según proveedor ----
 
-function leerFilasCOBECA(buffer) {
+export function leerFilasCOBECA(buffer) {
   const wb = XLSX.read(buffer, { type: 'buffer' });
   const ws = wb.Sheets[wb.SheetNames[0]];
   const json = XLSX.utils.sheet_to_json(ws, { defval: '' });
@@ -71,7 +71,7 @@ function leerFilasCOBECA(buffer) {
   }));
 }
 
-function leerFilasDrovencentro(buffer) {
+export function leerFilasDrovencentro(buffer) {
   const wb = XLSX.read(buffer, { type: 'buffer' });
   const ws = wb.Sheets[wb.SheetNames[0]];
   const refs = XLSX.utils.decode_range(ws['!ref'] || 'A1');
@@ -106,7 +106,7 @@ function leerFilas(proveedor, buffer) {
 
 // ---- Enlazado por proveedor ----
 
-function enlazarCOBECA(fila, productos, idx) {
+export function enlazarCOBECA(fila, productos, idx) {
   const parsed = parsearDescripcion(fila.desc);
   if (!parsed.forma) return { estado: 'no_farmaco' };
 
@@ -133,7 +133,7 @@ function enlazarCOBECA(fila, productos, idx) {
   return { estado: 'sin_match', motivo: candidatos.length ? 'score_bajo' : 'sin_candidato' };
 }
 
-function enlazarDrovencentro(fila, idxLab) {
+export function enlazarDrovencentro(fila, idxLab) {
   const m = matchDrovencentro(fila, idxLab);
   if (m) return { estado: 'matched', producto: m.producto, score: m.score };
   return { estado: 'sin_match', motivo: 'sin_candidato' };
