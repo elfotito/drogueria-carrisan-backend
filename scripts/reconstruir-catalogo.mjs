@@ -23,6 +23,7 @@ import {
   asignarSkus,
   packsUnicosPorEf,
 } from './reconstruccionHelpers.mjs';
+import { construirIndiceMolecula, rescatarCobeca } from './rescateCobeca.mjs';
 import PROVEEDORES from '../src/config/proveedores.js';
 import { normalizarNumero } from '../src/services/proveedores/normalizarNumero.js';
 
@@ -42,6 +43,26 @@ const DB_CONFIG = {
 function csvEscape(v) {
   const s = String(v ?? '');
   return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+// Parse simple de una línea CSV con campos entre comillas (comas internas).
+function parseCsvLine(linea) {
+  const out = [];
+  let cur = '';
+  let q = false;
+  for (let i = 0; i < linea.length; i++) {
+    const ch = linea[i];
+    if (q) {
+      if (ch === '"') {
+        if (linea[i + 1] === '"') { cur += '"'; i++; }
+        else q = false;
+      } else cur += ch;
+    } else if (ch === '"') q = true;
+    else if (ch === ',') { out.push(cur); cur = ''; }
+    else cur += ch;
+  }
+  out.push(cur);
+  return out;
 }
 
 async function main() {
@@ -87,54 +108,97 @@ async function main() {
     }));
     const idxCobeca = construirIndice(dbShape);
     const idxDrov = construirIndiceLaboratorio(dbShape);
+    const idxMol = construirIndiceMolecula(dbShape);
 
     const matches = []; // { ef, unidades, clavePack, proveedor, costo, productoIdCat, nombreRegistro, formaRegistro }
     const sinRegistro = []; // fila fármaco sin match -> reporte del dueño
     const rechazados = []; // todas las filas (reporte completo)
 
+    // --- Drovencentro pre-enlazado (se reusa para el rescate de sin-registro COBECA) ---
+    const drovenRows = leerFilasDrovencentro(fs.readFileSync(path.join(DIR_DATA, 'inventario-drovencentro.XLS')))
+      .map((f) => ({ f, e: enlazarDrovencentro(f, idxDrov) }));
+    console.log(`→ drovencentro: ${drovenRows.length} filas (pre-enlazadas)`);
+
+    const rescatadosA = []; // filas COBECA rescatadas a un producto existente (costo adicional)
+    const rescatadosNuevos = []; // propuestas de enlace nuevo (se aplican si el dueño las aprueba)
+
     for (const prov of ['cobeca', 'drovencentro']) {
-      const buf = fs.readFileSync(
-        prov === 'cobeca'
-          ? path.join(DIR_DATA, 'inventario-cobeca.xlsx')
-          : path.join(DIR_DATA, 'inventario-drovencentro.XLS')
-      );
-      const filas = prov === 'cobeca' ? leerFilasCOBECA(buf) : leerFilasDrovencentro(buf);
-      const fmt = PROVEEDORES[prov].formatoNumero;
-      console.log(`→ leyendo ${prov}: ${filas.length} filas`);
-
-      for (const f of filas) {
-        const costo = normalizarNumero(f.costoRaw, fmt);
-        const desc = (f.descripcion || f.desc || '').trim();
-        if (!desc) { rechazados.push({ prov, desc: '(vacía)', costo, estado: 'sin_match', motivo: 'descripcion vacia' }); continue; }
-        if (costo == null) { rechazados.push({ prov, desc, costo, estado: 'sin_match', motivo: 'sin costo' }); continue; }
-
-        const e = prov === 'cobeca' ? enlazarCOBECA(f, dbShape, idxCobeca) : enlazarDrovencentro(f, idxDrov);
-        rechazados.push({ prov, desc, costo, ef: e.producto?.ef, estado: e.estado, motivo: e.motivo || (e.estado === 'matched' ? `score=${(+e.score).toFixed(3)}` : '') });
-
-        if (e.estado === 'matched') {
-          const r = e.producto;
-          const pack = prov === 'cobeca'
-            ? detectarPackCobeca(desc)
-            : detectarPackDrovencentro(desc);
-          const clavePack = prov === 'cobeca'
-            ? (parsearDescripcion(desc).forma || null)
-            : (pack?.texto ?? null);
-          matches.push({
-            ef: r.ef,
-            unidades: pack?.unidades ?? null,
-            clavePack,
-            proveedor: prov,
-            costo: Number(costo.toFixed(2)),
-            productoIdCat: r.id,
-            nombreRegistro: r.nombre_comercial,
-            formaRegistro: r.forma,
-          });
-        } else if (e.estado !== 'no_farmaco') {
-          sinRegistro.push({ prov, desc, costo, motivo: e.motivo || 'sin_candidato' });
+      if (prov === 'cobeca') {
+        const fmt = PROVEEDORES.cobeca.formatoNumero;
+        const filas = leerFilasCOBECA(fs.readFileSync(path.join(DIR_DATA, 'inventario-cobeca.xlsx')));
+        console.log(`→ leyendo cobeca: ${filas.length} filas`);
+        for (const f of filas) {
+          const costo = normalizarNumero(f.costoRaw, fmt);
+          const desc = (f.descripcion || f.desc || '').trim();
+          if (!desc) { rechazados.push({ prov, desc: '(vacía)', costo, estado: 'sin_match', motivo: 'descripcion vacia' }); continue; }
+          if (costo == null) { rechazados.push({ prov, desc, costo, estado: 'sin_match', motivo: 'sin costo' }); continue; }
+          const e = enlazarCOBECA(f, dbShape, idxCobeca);
+          rechazados.push({ prov, desc, costo, ef: e.producto?.ef, estado: e.estado, motivo: e.motivo || (e.estado === 'matched' ? `score=${(+e.score).toFixed(3)}` : '') });
+          const pack = detectarPackCobeca(desc);
+          const clavePack = parsearDescripcion(desc).forma || null;
+          if (e.estado === 'matched') {
+            const r = e.producto;
+            matches.push({ ef: r.ef, unidades: pack?.unidades ?? null, clavePack, proveedor: 'cobeca', costo: Number(costo.toFixed(2)), productoIdCat: r.id, nombreRegistro: r.nombre_comercial, formaRegistro: r.forma });
+          } else if (e.estado !== 'no_farmaco') {
+            sinRegistro.push({ prov, desc, costo, motivo: e.motivo || 'sin_candidato' });
+            const r = rescatarCobeca({ desc, costo, drovenRows, dbShape, idxMol });
+            if (r?.camino === 'aCostoExistente') {
+              const reg = porEf.get(r.ef);
+              if (reg) {
+                matches.push({ ef: r.ef, unidades: pack?.unidades ?? null, clavePack, proveedor: 'cobeca', costo: Number(costo.toFixed(2)), productoIdCat: reg.id, nombreRegistro: reg.nombre, formaRegistro: reg.forma, rescatado: true });
+                rescatadosA.push({ desc, ef: r.ef, costo: Number(costo.toFixed(2)), score: r.score });
+              }
+            } else if (r?.camino === 'nuevoEnlace') {
+              rescatadosNuevos.push({ desc, ef: r.ef, costo: Number(costo.toFixed(2)), score: r.score });
+            }
+          }
+        }
+      } else {
+        const fmt = PROVEEDORES.drovencentro.formatoNumero;
+        for (const { f, e } of drovenRows) {
+          const costo = normalizarNumero(f.costoRaw, fmt);
+          const desc = (f.descripcion || f.desc || '').trim();
+          if (!desc) { rechazados.push({ prov, desc: '(vacía)', costo, estado: 'sin_match', motivo: 'descripcion vacia' }); continue; }
+          if (costo == null) { rechazados.push({ prov, desc, costo, estado: 'sin_match', motivo: 'sin costo' }); continue; }
+          rechazados.push({ prov, desc, costo, ef: e.producto?.ef, estado: e.estado, motivo: e.motivo || (e.estado === 'matched' ? `score=${(+e.score).toFixed(3)}` : '') });
+          if (e.estado === 'matched') {
+            const r = e.producto;
+            const pack = detectarPackDrovencentro(desc);
+            matches.push({ ef: r.ef, unidades: pack?.unidades ?? null, clavePack: pack?.texto ?? null, proveedor: prov, costo: Number(costo.toFixed(2)), productoIdCat: r.id, nombreRegistro: r.nombre_comercial, formaRegistro: r.forma });
+          } else if (e.estado !== 'no_farmaco') {
+            sinRegistro.push({ prov, desc, costo, motivo: e.motivo || 'sin_candidato' });
+          }
         }
       }
     }
-    console.log(`→ matched=${matches.length}, sinRegistro=${sinRegistro.length}`);
+    console.log(`→ matched=${matches.length}, sinRegistro=${sinRegistro.length}, rescatadosA=${rescatadosA.length}, nuevosPropuestos=${rescatadosNuevos.length}`);
+
+    // --- Rescate aprobado por el dueño (camino 'nuevoEnlace') ---
+    // data/cobeca_rescate_aprobados.csv = data/cobeca_rescate_nuevos_<fecha>.csv con
+    // las filas que el dueño decide aplicar (borra el resto). Cabecera:
+    // descripcion,costo_usd,ef,pa_drovencentro,score
+    const rutaAprobados = path.join(DIR_DATA, 'cobeca_rescate_aprobados.csv');
+    let aprobadosAplicados = 0;
+    let aprobadosOmitidos = 0;
+    if (fs.existsSync(rutaAprobados)) {
+      const lineas = fs.readFileSync(rutaAprobados, 'utf8').split(/\r?\n/).filter((l) => l.trim().length);
+      lineas.shift(); // header
+      for (const l of lineas) {
+        const cols = parseCsvLine(l);
+        if (!cols || cols.length < 5) { aprobadosOmitidos++; continue; }
+        const desc = (cols[0] || '').trim();
+        const costo = parseFloat(String(cols[1] || '').replace(',', '.'));
+        const ef = (cols[2] || '').trim().toUpperCase();
+        const reg = porEf.get(ef);
+        if (!desc || !Number.isFinite(costo) || costo <= 0 || !reg) { aprobadosOmitidos++; continue; }
+        const pack = detectarPackCobeca(desc);
+        matches.push({ ef, unidades: pack?.unidades ?? null, clavePack: parsearDescripcion(desc).forma || null, proveedor: 'cobeca', costo: Number(costo.toFixed(2)), productoIdCat: reg.id, nombreRegistro: reg.nombre, formaRegistro: reg.forma, aprobado: true });
+        aprobadosAplicados++;
+      }
+      console.log(`→ aprobados: ${aprobadosAplicados} aplicados, ${aprobadosOmitidos} omitidos (fila vacía o ef inválido)`);
+    } else {
+      console.log(`→ sin ${path.basename(rutaAprobados)}: solo se aplica el rescate a productos ya existentes`);
+    }
 
     // --- Regla anti-colisión: si un ef tiene matches CON pack y sin pack (null),
     //     los null son referencias ambiguas a packs ya cubiertos -> se descartan
@@ -296,7 +360,7 @@ async function main() {
     fs.writeFileSync(path.join(DIR_DATA, `reconstruccion_sin_registro_${fecha}.csv`), csvSinRegistro);
     console.log(`CSV: data/reconstruccion_catalogo_${fecha}.csv (${rechazados.length} filas)`);
     console.log(`CSV: data/reconstruccion_sin_registro_${fecha}.csv (${sinRegistro.length} sin registro)`);
-    console.log(`Resumen: matched=${matches.length} (${matchesFiltrados.length} tras anti-colisión), sinRegistro=${sinRegistro.length}, productos=${nuevos}`);
+    console.log(`Resumen: matched=${matches.length} (${matchesFiltrados.length} tras anti-colisión), sinRegistro=${sinRegistro.length}, rescatadosA=${rescatadosA.length}, aprobados=${aprobadosAplicados}, productos=${nuevos}`);
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('ERROR:', err);
