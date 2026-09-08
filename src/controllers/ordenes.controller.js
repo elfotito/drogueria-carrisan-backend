@@ -180,6 +180,11 @@ export async function construirOrden(usuario_id, datos, opciones = {}) {
     if (!producto || !producto.disponible) {
       throw new ErrorOrden(400, `Producto ${item.producto_id} no disponible`);
     }
+    // REGLA: un producto publicado sin precio (NULL/0) no se puede comprar.
+    // "Consultar precio" es la vía correcta hasta que el dueño fije precio.
+    if (!producto.precio_usd || Number(producto.precio_usd) <= 0) {
+      throw new ErrorOrden(400, `Producto ${item.producto_id} no tiene precio asignado`);
+    }
   }
 
   let total_usd = 0;

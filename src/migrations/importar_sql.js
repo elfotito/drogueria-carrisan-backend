@@ -1,18 +1,21 @@
 // importar_directo.js
 import fs from 'fs';
 import pg from 'pg';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 const { Client } = pg;
 
 // ============================================================
-// CONFIGURACIÓN - REEMPLAZA CON TUS DATOS
+// CONFIGURACIÓN - se lee de variables de entorno (.env local / Render)
 // ============================================================
 const DB_CONFIG = {
-    host: 'aws-1-us-west-2.pooler.supabase.com',  // ← Tu host de Supabase
-    port: 5432,
-    database: 'postgres',
-    user: 'postgres.fqeshthtycmzgyibiurq',
-    password: 'carrisan1410',           // ← Tu contraseña
+    host: process.env.SUPABASE_DB_HOST,
+    port: process.env.SUPABASE_DB_PORT || 5432,
+    database: process.env.SUPABASE_DB_NAME || 'postgres',
+    user: process.env.SUPABASE_DB_USER,
+    password: process.env.SUPABASE_DB_PASSWORD,
     ssl: { rejectUnauthorized: false }
 };
 

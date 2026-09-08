@@ -21,6 +21,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CSV = path.join(ROOT, 'data', 'productos_inhrr.csv').replace(/\\/g, '/');
 const JSON_PATH = path.join(ROOT, 'data', 'productos_inhrr.json').replace(/\\/g, '/');
 const MOL_CSV = path.join(ROOT, 'data', 'moleculas_referencias_import.csv').replace(/\\/g, '/');
+const OVERRIDES_CSV = path.join(ROOT, 'data', 'moleculas_overrides.csv').replace(/\\/g, '/');
 const OUT = {
   productos: path.join(ROOT, 'data', 'catalogo_productos_import.csv').replace(/\\/g, '/'),
   moleculas: path.join(ROOT, 'data', 'catalogo_moleculas_import.csv').replace(/\\/g, '/'),
@@ -321,6 +322,34 @@ await connection.run(`
   ) x WHERE rn = 1
 `);
 
+// Overrides manuales del dueno (catalogo_moleculas_revisar.csv corregido).
+// Se aplican DESPUES del fuzzy match: mol_inhrr -> mol_cima. Si mol_inhrr no
+// existiera en los datos, el join contra mols_inhrr lo descarta sin efecto.
+await connection.run(`
+  CREATE OR REPLACE TEMP TABLE mol_overrides AS
+  SELECT trim(mol_inhrr) AS mol_inhrr, trim(mol_cima) AS mol_cima, 1.0 AS score
+  FROM read_csv('${OVERRIDES_CSV}', header=true, all_varchar=true)
+  WHERE trim(mol_inhrr) <> '' AND trim(mol_cima) <> ''
+`);
+
+await connection.run(`
+  CREATE OR REPLACE TEMP TABLE mol_resolved_final AS
+  SELECT mol_inhrr, mol_cima, max(score) AS score
+  FROM (
+    SELECT mol_inhrr, mol_cima, score FROM mol_resolved
+    UNION ALL
+    SELECT r.mol_inhrr, o.mol_cima, o.score
+    FROM mol_overrides o
+    JOIN mols_inhrr r ON r.mol_inhrr = o.mol_inhrr
+  ) x
+  GROUP BY 1, 2
+`);
+
+const overridesCount = (await connection.runAndReadAll(`
+  SELECT count(distinct mol_inhrr) AS n FROM mol_overrides
+`)).getRowObjects()[0];
+console.log('overrides manuales:', overridesCount.n.toString());
+
 await connection.run(`
   CREATE OR REPLACE TEMP TABLE mol_review AS
   SELECT mol_inhrr, ref_base AS mol_cima, round(score, 3) AS score
@@ -329,14 +358,14 @@ await connection.run(`
       row_number() OVER (PARTITION BY mol_inhrr ORDER BY score DESC, ref_base) AS rn
     FROM mol_scored
     WHERE score >= 0.75 AND score < 0.9
-  ) x WHERE rn = 1 AND mol_inhrr NOT IN (SELECT mol_inhrr FROM mol_resolved)
+  ) x WHERE rn = 1 AND mol_inhrr NOT IN (SELECT mol_inhrr FROM mol_resolved_final)
 `);
 
 const matchStats = (await connection.runAndReadAll(`
   SELECT
-    (SELECT count(distinct mol_inhrr) FROM mol_resolved) AS con_match,
+    (SELECT count(distinct mol_inhrr) FROM mol_resolved_final) AS con_match,
     (SELECT count(distinct mol_inhrr) FROM mols_inhrr
-       WHERE mol_inhrr NOT IN (SELECT mol_inhrr FROM mol_resolved)) AS sin_match
+       WHERE mol_inhrr NOT IN (SELECT mol_inhrr FROM mol_resolved_final)) AS sin_match
 `)).getRowObjects()[0];
 console.log('match: con =', matchStats.con_match.toString(), '| sin =', matchStats.sin_match.toString());
 
@@ -344,7 +373,7 @@ await connection.run(`
   COPY (
     SELECT DISTINCT m.ef, m.mol_inhrr, r.mol_cima, r.score
     FROM mols_inhrr m
-    JOIN mol_resolved r ON r.mol_inhrr = m.mol_inhrr
+    JOIN mol_resolved_final r ON r.mol_inhrr = m.mol_inhrr
     ORDER BY m.ef, r.score DESC
   ) TO '${OUT.moleculas}' (HEADER, DELIMITER ',')
 `);
@@ -353,7 +382,7 @@ await connection.run(`
   COPY (
     SELECT m.mol_inhrr, count(distinct m.ef) AS veces
     FROM mols_inhrr m
-    LEFT JOIN mol_resolved r ON r.mol_inhrr = m.mol_inhrr
+    LEFT JOIN mol_resolved_final r ON r.mol_inhrr = m.mol_inhrr
     LEFT JOIN mol_review v ON v.mol_inhrr = m.mol_inhrr
     WHERE r.mol_inhrr IS NULL AND v.mol_inhrr IS NULL
     GROUP BY 1 ORDER BY 2 DESC, 1
@@ -365,6 +394,7 @@ await connection.run(`
     SELECT m.mol_inhrr, v.mol_cima, v.score, count(distinct m.ef) AS veces
     FROM mol_review v
     JOIN mols_inhrr m ON m.mol_inhrr = v.mol_inhrr
+    WHERE v.mol_inhrr NOT IN (SELECT mol_inhrr FROM mol_resolved_final)
     GROUP BY 1, 2, 3 ORDER BY 4 DESC, 1
   ) TO '${OUT.review}' (HEADER, DELIMITER ',')
 `);
