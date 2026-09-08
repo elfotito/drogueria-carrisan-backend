@@ -31,7 +31,7 @@ src/
 ├── middleware/                 # auth.js, Ratelimit.js, soloAdmin.middleware.js, staffAuth.js (JWT staff interno)
 ├── services/                  # push.service.js (web-push)
 ├── jobs/                      # Tareas cron (limpiezaNotificaciones, revisarVencimientos)
-├── migrations/                # SQL de migraciones (010-013) + scripts de import
+├── migrations/                # SQL de migraciones (010-023) + scripts de import
 └── utils/                     # turnstile.js (verificacion anti-bot)
 ```
 
@@ -215,7 +215,7 @@ Objetivo: crear un catálogo público de consulta (`productos_catalogo`) basado 
 
 ## Migraciones SQL
 
-Ubicacion: `src/migrations/` (010-013)
+Ubicacion: `src/migrations/` (010-023)
 
 Las migraciones son SQL plano. NO hay sistema de migraciones automatico — se ejecutan manualmente en Supabase SQL Editor.
 
@@ -232,6 +232,9 @@ Las migraciones son SQL plano. NO hay sistema de migraciones automatico — se e
 | 018_productos_fuente_unique.sql | Reemplaza el índice único parcial de `fuente_inhrr_ef` por una **constraint UNIQUE real** (PostgREST no soporta onConflict contra índices parciales) — habilita el upsert del importador |
 | 019_productos_precio_nullable.sql | Quita el NOT NULL de `productos.precio_usd` (el diseño "consultar precio" usa NULL = sin precio; NO comprable hasta fijar precio > 0) |
 | 020_eliminar_check_forma.sql | Elimina el CHECK legacy `productos_forma_check` (whitelist tipo 'Ampolla' que NO acepta las formas del catálogo INHRR: INYECTABLE, POLVO LIOFILIZADO, JERINGA PRELLENADA, POLVO PARA RECONSTITUCION) — validación pasa a la app |
+| 021_laboratorio_fabricante.sql | Corrige `productos.laboratorio` al fabricante real del registro INHRR (el import inicial metió patrocinante/representante). NECESARIA para el match por laboratorio de los importadores de precios |
+| 022_producto_costo.sql | Columna `productos.costo_usd numeric NULL` — costo base para la fórmula de precio `precio_usd = round(costo_usd / 0.6, 2)`. Base del flujo de importación de precios de proveedor |
+| 023_producto_costos.sql | Tabla `producto_costos` (costos POR PROVEEDOR): `proveedor text` + `producto_id integer NOT NULL REFERENCES productos(id) ON DELETE CASCADE` (**`productos.id` es `integer`, NO uuid**) + `costo_usd numeric NOT NULL CHECK >= 0` + `fecha timestamptz default now()` + `PK(proveedor, producto_id)`. `productos.costo_usd` = `MIN(producto_costos)` global; precio = min/0.6. Usada por `src/services/proveedores/importarProveedor.js`
 
 **NOTA**: Las migraciones 002-009 ya NO existen como archivos (fueron consolidadas/aplicadas directamente en Supabase). La tabla principal `users` tampoco esta en estas migraciones — fue creada directamente en Supabase. Si necesitas ver su schema, busca las queries en los controllers (especialmente auth.controller.js y users.controller.js).
 

@@ -1,8 +1,38 @@
 import { supabase } from '../config/supabase.js';
 import { aplicarDescuentosAProductos } from './descuentos.controller.js';
 import { notificarDisponibles } from './alertasDisponibilidad.controller.js';
+import importarProveedor from '../services/proveedores/importarProveedor.js';
+import PROVEEDORES from '../config/proveedores.js';
 
-// GET /staff/precios
+// POST /staff/precios/importar-proveedor
+// Multipart: fields `proveedor` y `archivo`. Procesa un Excel/CSV de un proveedor
+// (COBECA, Drovencentro) iniciando el flujo de importación multi-proveedor:
+// lee el archivo, enlaza contra `productos`, guarda `producto_costos` (costo por
+// proveedor), recalcula `costo_usd` (min por proveedor) + `precio_usd` y devuelve
+// resumen + CSV de control con los sin-match.
+export async function importarPreciosProveedor(req, res) {
+  const proveedor = (req.body?.proveedor || '').trim().toLowerCase();
+  if (!PROVEEDORES[proveedor]) {
+    return res.status(400).json({ error: `Proveedor no soportado. Disponibles: ${Object.keys(PROVEEDORES).join(', ')}` });
+  }
+  if (!req.file) {
+    return res.status(400).json({ error: 'Debe incluir el archivo del proveedor (campo `archivo`)' });
+  }
+
+  try {
+    const resultado = await importarProveedor({
+      buffer: req.file.buffer,
+      nombre: req.file.originalname,
+      proveedor,
+    });
+    res.json(resultado);
+  } catch (err) {
+    console.error('Error al importar precios de proveedor (staff):', err);
+    const status = err.status || 500;
+    res.status(status).json({ error: err.message || 'Error del servidor' });
+  }
+}
+
 export async function getPreciosStaff(req, res) {
   const { search, linea, forma, laboratorio, atc, sin_precio, disponible, sort, page, limit } = req.query;
   const usarPaginacion = page !== undefined;

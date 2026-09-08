@@ -1,0 +1,568 @@
+// scripts/lib/cobecaParser.mjs
+// Parser farmacéutico: expande abreviaturas de la descripción COBECA y hace
+// matching difuso contra los productos de la BD (molécula + forma + concentración + laboratorio).
+// Funciones puras, sin side effects, sin imports de BD.
+
+export const FORMAS_ABREV = {
+  tab: 'tabletas',
+  tabs: 'tabletas',
+  comp: 'comprimidos',
+  com: 'comprimidos',
+  cap: 'capsulas',
+  caps: 'capsulas',
+  jbe: 'jarabe',
+  jar: 'jarabe',
+  jarabe: 'jarabe',
+  pvo: 'polvo',
+  polvo: 'polvo',
+  susp: 'suspension',
+  sus: 'suspension',
+  gts: 'gotas',
+  gotas: 'gotas',
+  amp: 'solucion inyectable',
+  ampul: 'solucion inyectable',
+  iny: 'inyectable',
+  inyec: 'inyectable',
+  sol: 'solucion',
+  solu: 'solucion',
+  crem: 'crema',
+  crema: 'crema',
+  gel: 'gel',
+  loc: 'locion',
+  tinte: 'tintura',
+  tint: 'tintura',
+  sob: 'sobre',
+  sobre: 'sobre',
+  disp: 'dispersable',
+  rec: 'recubierta',
+  recub: 'recubierta',
+  bld: 'blanda',
+  mast: 'masticable',
+  of: 'oftalmica',
+  oft: 'oftalmica',
+  ofl: 'oftalmica',
+  spr: 'spray',
+  aer: 'aerosol',
+  aeros: 'aerosol',
+  champu: 'champu',
+  champ: 'champu',
+  jab: 'jabon',
+  jabon: 'jabon',
+  lio: 'liofilizado',
+  liof: 'liofilizado',
+  ll: 'liofilizado',
+  pll: 'prellenada',
+  prel: 'prellenada',
+  ovu: 'ovulos',
+  ovul: 'ovulos',
+  par: 'parche',
+  parch: 'parche',
+  mata: 'matafrasco',
+  ped: 'pediatrica',
+  oral: 'oral',
+  dent: 'dental',
+  barra: 'barra',
+  ung: 'unguento',
+  pom: 'pomada',
+  emul: 'emulsion',
+  suspencion: 'suspension',
+  tablet: 'tabletas',
+  tabl: 'tabletas',
+  grag: 'grajeas',
+  sup0: 'supositorios',
+};
+
+// Tokens de ruido (abreviaturas de marca, sufijos, presentación) que no son
+// parte de la molécula ni del laboratorio.
+export const STOPWORDS = new Set([
+  'x', 'con', 'de', 'del', 'la', 'para', 'uso', 't', 'c', 's', 'a', 'p', 'm',
+  'cr', 'mt', 'rc', 'rt', 'cm', 'cap', 'capm', 'jebe', 'tabs', 'compr',
+  'plus', 'f', 'g', 'n', 'z', 'k', 'h', 'bp', 'cv', 'v', 'abr',
+  'ext', 'virg', 'extra', 'virgen', 'puro', 'pura', 'pura', 'natural',
+  'sal', 'sabor', 'aroma', 'color', 'morado', 'gris', 'rojo', 'azul', 'verde',
+  'clasico', 'original', 'normal', 'regular',
+  'med', 'sup', 'derm', 'crop', 'corp', 'derma', 'nct', 'esp', 'fort',
+]);
+
+// Equivalencias de forma farmacéutica: mapea la forma normalizada de BD
+// (que viene en mayúsculas) a una categoría canónica para comparar con COBECA.
+export const FORMAS_EQUIV = {
+  'tabletas': ['tabletas', 'comprimidos', 'tablets', 'grageas', 'tableta', 'comprimido'],
+  'comprimidos': ['tabletas', 'comprimidos', 'tablets', 'grageas', 'tableta', 'comprimido'],
+  'tablets': ['tabletas', 'comprimidos', 'tablets', 'grageas', 'tableta', 'comprimido'],
+  'capsulas': ['capsulas', 'capsula', 'tabletas'],
+  'jarabe': ['jarabe', 'suspension', 'suspension oral', 'suspension'],
+  'suspension': ['suspension', 'suspension oral', 'polvo para suspension', 'polvo para suspension oral', 'jarabe'],
+  'polvo': ['polvo', 'polvo para reconstitucion', 'polvo para suspension', 'polvo para reconstituir'],
+  'suspension oral': ['suspension oral', 'suspension', 'polvo para suspension oral', 'polvo para suspension', 'jarabe'],
+  'gotas': ['gotas', 'solucion oftalmica', 'solucion'],
+  'crema': ['crema', 'unguento', 'pomada', 'locion'],
+  'unguento': ['crema', 'unguento', 'pomada', 'locion'],
+  'pomada': ['crema', 'unguento', 'pomada', 'locion'],
+  'locion': ['locion', 'crema', 'unguento', 'pomada'],
+  'gel': ['gel', 'solucion topica', 'crema'],
+  'inyectable': ['inyectable', 'solucion inyectable', 'polvo para solucion inyectable', 'inhalacion', 'ampolla', 'jeringa prellenada'],
+  'solucion inyectable': ['inyectable', 'solucion inyectable', 'polvo para solucion inyectable', 'ampolla', 'jeringa prellenada'],
+  'inhalacion': ['inhalacion', 'solucion inyectable'],
+  'ampolla': ['inyectable', 'solucion inyectable', 'ampolla'],
+  'spray': ['spray', 'aerosol', 'solucion nasal', 'solucion'],
+  'aerosol': ['spray', 'aerosol', 'solucion nasal', 'solucion'],
+  'champu': ['champu', 'locion', 'jabon'],
+  'jabon': ['jabon', 'champu'],
+  'ovulos': ['ovulos', 'supositorios'],
+  'supositorios': ['ovulos', 'supositorios'],
+  'solucion': ['solucion', 'solucion oral', 'solucion topica', 'solucion nasal', 'solucion oftalmica', 'solucion ototopica', 'gotas'],
+  'solucion oral': ['solucion oral', 'solucion', 'jarabe', 'suspension oral'],
+  'solucion topica': ['solucion topica', 'solucion', 'crema', 'unguento', 'gel'],
+  'solucion oftalmica': ['solucion oftalmica', 'solucion', 'gotas'],
+  'solucion nasal': ['solucion nasal', 'solucion', 'spray', 'aerosol'],
+  'solucion ototopica': ['solucion ototopica', 'solucion', 'gotas'],
+  'polvo para reconstitucion': ['polvo para reconstitucion', 'polvo', 'polvo para suspension', 'polvo para suspension oral'],
+  'jeringa prellenada': ['jeringa prellenada', 'inyectable', 'solucion inyectable'],
+  'tintura': ['tintura', 'solucion', 'solucion topica'],
+  'pastilla': ['pastilla', 'tabletas', 'comprimidos'],
+  'granulados': ['granulados', 'polvo', 'sobre'],
+  'parche': ['parche', 'crema', 'unguento'],
+  'anillo vaginal': ['anillo vaginal', 'ovulos', 'supositorios'],
+};
+
+export function formasSonEquivalentes(formaCobeca, formaDb) {
+  const lista = FORMAS_EQUIV[formaCobeca];
+  if (!lista) return false;
+  return lista.some(f => formaDb.includes(f));
+}
+
+
+// Abreviaturas de moléculas más comunes
+export const MOL_ABREV = {
+  ac: 'acido',
+  acido: 'acido',
+  na: 'sodio',
+  nacl: 'cloruro de sodio',
+  kcl: 'cloruro de potasio',
+  mg: 'magnesio',
+  ca: 'calcio',
+  aas: 'acido acetilsalicilico',
+  atb: 'antibiotico',
+  apap: 'acetaminofen',
+  amox: 'amoxicilina',
+  dxm: 'dexametasona',
+  dex: 'dexametasona',
+  pred: 'prednisolona',
+  predn: 'prednisolona',
+  vit: 'vitamina',
+  vitc: 'acido ascorbico',
+  vitb: 'vitamina b',
+  tiamina: 'vitamina b1',
+  riboflavina: 'vitamina b2',
+  piridoxina: 'vitamina b6',
+  cianocobalamina: 'vitamina b12',
+  vitd: 'vitamina d',
+  colecalciferol: 'vitamina d3',
+  vtk: 'vitamina k',
+  hierro: 'hierro',
+  ferroso: 'hierro',
+  vaca: 'vacuna',
+  cla: 'clindamicina',
+  clind: 'clindamicina',
+  cipro: 'ciprofloxacina',
+  azt: 'azitromicina',
+  azi: 'azitromicina',
+  claforan: 'cefotaxima',
+  ceftriax: 'ceftriaxona',
+  peni: 'penicilina',
+  amp: 'ampicilina',
+  gent: 'gentamicina',
+  amika: 'amikacina',
+  vanco: 'vancomicina',
+  metro: 'metronidazol',
+  mtro: 'metronidazol',
+  ketorolac: 'ketorolaco',
+  diclo: 'diclofenaco',
+  anti: 'antihistaminico',
+  parac: 'paracetamol',
+  para: 'paracetamol',
+  tylenol: 'paracetamol',
+  ibu: 'ibuprofeno',
+  asp: 'aspirina',
+};
+
+// Abreviaturas de laboratorio/fabricante más comunes en COBECA
+export const LAB_ABREV = {
+  meg: 'megalabs',
+  megalabs: 'megalabs',
+  bioq: 'bioquimica',
+  bioquimica: 'bioquimica',
+  plx: 'plusandex',
+  plusandex: 'plusandex',
+  varg: 'laboratorios vargas',
+  vargas: 'laboratorios vargas',
+  leti: 'laboratorios leti',
+  'leti sau': 'laboratorios leti',
+  pharme: 'sm pharma',
+  smpharma: 'sm pharma',
+  vlm: 'valmor',
+  valmor: 'valmor',
+  cofa: 'cofasa',
+  cofasa: 'cofasa',
+  elm: 'elmor',
+  elmor: 'elmor',
+  far: 'laboratorios farma',
+  farma: 'laboratorios farma',
+  biotech: 'biotech laboratorios',
+  clx: 'calox international',
+  calox: 'calox international',
+  krka: 'krka',
+  roemmers: 'roemmers',
+  gador: 'gador',
+  bago: 'bago',
+  winthrop: 'winthrop',
+  bayer: 'bayer',
+  pfizer: 'pfizer',
+  gsk: 'glaxosmithkline',
+  msd: 'merck',
+  novartis: 'novartis',
+  abbott: 'abbott',
+  sanofi: 'sanofi',
+  goicochea: 'goicochea',
+};
+
+// Normaliza: minúsculas, sin acentos, un solo espacio, solo [a-z0-9 ]
+export function normalizar(s = '') {
+  return String(s)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function expandirAbreviatura(token) {
+  const t = normalizar(token);
+  const clave = t.replace(/[.,]/g, '');
+  if (FORMAS_ABREV[clave]) return FORMAS_ABREV[clave];
+  if (MOL_ABREV[clave]) return MOL_ABREV[clave];
+  return clave;
+}
+
+// Distancia de Levenshtein
+export function leven(a, b) {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  const alen = a.length, blen = b.length;
+  // Limitar tamaño de la matriz para descripciones largas
+  const prev = new Array(blen + 1);
+  const curr = new Array(blen + 1);
+  for (let j = 0; j <= blen; j++) prev[j] = j;
+  for (let i = 0; i < alen; i++) {
+    curr[0] = i + 1;
+    for (let j = 0; j < blen; j++) {
+      const cost = a[i] === b[j] ? 0 : 1;
+      curr[j + 1] = Math.min(curr[j] + 1, prev[j + 1] + 1, prev[j] + cost);
+    }
+    for (let j = 0; j <= blen; j++) prev[j] = curr[j];
+  }
+  return prev[blen];
+}
+
+// Similaridad de tokens (0..1)
+export function tokenSim(a, b) {
+  if (a === b) return 1;
+  const maxLen = Math.max(a.length, b.length) || 1;
+  return 1 - leven(a, b) / maxLen;
+}
+
+// Detecta si un token es concentración (número con unidad como mg/ml/g/ug/iu/+/%)
+const CONCENTRACION_RE = /^\d+[.,]?\d*\s*(mg|ml|g|ug|iu|mcg|ui|unidades|unidad|%|gr)?$/i;
+export function esConcentracion(token) {
+  const t = normalizar(token);
+  return /^\d/.test(t) && /(mg|ml|g|ug|iu|mcg|ui|un|%|,|\.)/.test(t) && !(/^x\d/.test(t));
+}
+
+// Parse de la forma farmacéutica: devuelve el token expandido de forma si existe
+export function detectarForma(rawTokens) {
+  // Buscar el token que expande a una forma
+  for (const tok of rawTokens) {
+    const clave = normalizar(tok);
+    if (FORMAS_ABREV[clave]) return FORMAS_ABREV[clave];
+    // Comprobar tokens compuestos como "TAB DISP", "TAB REC", "CAP BLD"
+    if (['tab', 'tabs', 'cap', 'caps', 'comp', 'com'].includes(clave)) {
+      // combinaciones de dos tokens
+      // 'tab' solo -> formas
+      return FORMAS_ABREV[clave];
+    }
+  }
+  return null;
+}
+
+// Parse de la descripción COBECA en tokens
+export function parsearDescripcion(desc) {
+  const norm = normalizar(desc);
+  const rawTokens = norm.split(/\s+/);
+  const molTokens = [];
+  let conc = null;
+  let forma = null;
+  let labToken = null;
+
+  const concParts = [];
+
+  for (let i = 0; i < rawTokens.length; i++) {
+    const tok = rawTokens[i];
+    // Token de forma farmacéutica (exacto o con combinación)
+    if (FORMAS_ABREV[tok]) {
+      forma = FORMAS_ABREV[tok];
+      continue;
+    }
+    // Combinaciones de dos tokens (TAB DISP, TAB REC, etc.) — la forma base
+    if (tok === 'tab' && rawTokens[i+1] && !FORMAS_ABREV[rawTokens[i+1]] && !esConcentracion(rawTokens[i+1])) {
+      forma = 'tabletas';
+      i++;
+      continue;
+    }
+    if ((tok === 'tab' || tok === 'tabs') && FORMAS_ABREV[rawTokens[i + 1]] && rawTokens[i+1] !== 'disp' && rawTokens[i+1] !== 'rec') {
+      // TAB REC / TAB DISP: mantiene la forma base TABLETAS, el sufijo es info extra
+      forma = 'tabletas';
+      i++;
+      continue;
+    }
+    // Concentración: contiene número con unidad
+    if (esConcentracion(tok)) {
+      concParts.push(tok);
+      continue;
+    }
+    // Tokens X10, X30 (cantidad de presentación) — no son molécula ni concentración, saltar
+    if (/^x\d+/.test(tok)) continue;
+    // Tokens que solo son puntuación o volumen -> saltar (200ML, 30ML, etc.)
+    if (/^\d+ml$/.test(tok)) { concParts.push(tok); continue; }
+    if (/^\d+%.*/.test(tok)) { continue; }
+    if (/^\d+$/.test(tok)) { continue; } // números sueltos (cantidad de unidades)
+
+    // Stopwords (ruido de marca/presentación) que no aportan a la molécula
+    if (STOPWORDS.has(tok)) continue;
+
+    // resto: token de molécula o laboratorio
+    molTokens.push(tok);
+  }
+
+  // Detección de laboratorio: el token solo es laboratorio si está en el mapa de
+  // abreviaturas conocidas o parece una marca de la casa (token corto y no-palabra).
+  labToken = null;
+  if (molTokens.length > 1) {
+    const ultimo = molTokens[molTokens.length - 1];
+    const enLab = LAB_ABREV[ultimo];
+    const pareceMarca = ultimo.length <= 4 && !STOPWORDS.has(ultimo);
+    if (enLab || pareceMarca) {
+      labToken = ultimo;
+    }
+  }
+
+  // Quitar el token de laboratorio de la lista de tokens de molécula
+  let molFinal = molTokens;
+  if (labToken) {
+    molFinal = molTokens.slice(0, -1);
+  }
+
+  conc = concParts.length > 0 ? concParts.join(' ') : null;
+
+  return { molTokens: molFinal, conc, forma, labToken };
+}
+
+// Detecta el nombre de molécula normalizado desde un producto DB (molecula field)
+// La columna molecula a veces incluye la concentración (ej. "DIPIRONA 500 MG")
+export function limpiarMoleculaDb(molecula) {
+  if (!molecula) return '';
+  const norm = normalizar(molecula);
+  // Quitar concentración del final (los números)
+  const tokens = norm.split(/\s+/);
+  const filtrados = tokens.filter(t => !/^\d/.test(t) && !/^(mg|ml|g|ug|iu|mcg|ui|un|%|unidades)$/.test(t));
+  return filtrados.join(' ');
+}
+
+// Compara una cadena COBECA (descripción) con el nombre_comercial de la BD.
+// Devuelve similitud 0..1 considerando marca + forma + concentración.
+export function scoreNombreComercial(parseado, nombreComercialDb) {
+  const nomDb = normalizar(nombreComercialDb || '');
+  if (!nomDb) return 0;
+
+  const tokensCobeca = parseado.molTokens.concat(parseado.conc ? parseado.conc.split(/\s+/) : []);
+  const tokensDb = nomDb.split(/\s+/);
+
+  let aciertos = 0;
+  let totalCobeca = 0;
+  for (const tc of tokensCobeca) {
+    if (!tc) continue;
+    totalCobeca++;
+    let mejor = 0;
+    for (const td of tokensDb) {
+      if (td === tc) { mejor = 1; break; }
+      const sim = tokenSim(tc, td);
+      if (sim > mejor) mejor = sim;
+    }
+    // Los tokens de laboratorio (marca de la casa al final) pesan menos
+    const esLab = parseado.labToken && tc === parseado.labToken;
+    aciertos += mejor * (esLab ? 0.4 : 1);
+  }
+  if (totalCobeca === 0) return 0;
+
+  // Normalizar por tokens únicos del nombre DB para no penalizar por longitud
+  const base = Math.min(totalCobeca, tokensDb.length) || totalCobeca;
+  return aciertos / (base * 1.0);
+}
+
+// Tokens de molécula "significativos" de la descripción COBECA: sin stopwords,
+// sin formas, sin concentraciones, longitud >= 4. Son las palabras que anclan el
+// fármaco real (ej. 'aciclovir', 'borico') y previenen falsos positivos.
+export function tokensSignificativos(parseado) {
+  const tokens = parseado.molTokens
+    .map((t) => (FORMAS_ABREV[t] ? null : t))
+    .filter((t) => t && t.length >= 4 && !STOPWORDS.has(t) && !esConcentracion(t) && !/^\d/.test(t))
+    .map(expandirAbreviatura)
+    .filter((t) => t.length >= 4);
+  return tokens;
+}
+
+// Verifica que al menos un token significativo de la molécula COBECA matchee con
+// el nombre o la molécula del producto BD (similitud >= ANCLA_UMBRAL). Si ningún
+// token significativo matchea, el candidato es probablemente un falso positivo.
+export function tieneAncla(parsed, productoDb, umbral = 0.72) {
+  const sig = tokensSignificativos(parsed);
+  if (sig.length === 0) return true; // sin ancla posible, no bloquea
+  const textoDb = normalizar(`${productoDb.nombre_comercial || ''} ${productoDb.molecula || ''}`);
+  const tokensDb = textoDb.split(/\s+/).filter((t) => t.length >= 3);
+  for (const t of sig) {
+    let mejor = 0;
+    for (const td of tokensDb) {
+      const s = tokenSim(t, td);
+      if (s > mejor) mejor = s;
+    }
+    if (mejor >= umbral) return true;
+  }
+  return false;
+}
+
+// Índice de búsqueda rápida: mapea cada token clave -> lista de productos DB que
+// lo contienen en nombre_comercial o molecula. Permite filtrar candidatos sin
+// recorrer los 7.402 productos por cada fila COBECA.
+export function construirIndice(productos) {
+  const idx = new Map();
+  for (const p of productos) {
+    const pico = new Set();
+    const nom = normalizar(`${p.nombre_comercial || ''} ${p.molecula || ''}`);
+    for (const tok of nom.split(/\s+/)) {
+      if (tok.length < 3) continue;          // tokens cortos no discriminan
+      if (/^\d/.test(tok)) continue;          // números no discriminan
+      const clave = expandirAbreviatura(tok);
+      if (clave.length < 3) continue;
+      pico.add(clave);
+    }
+    for (const clave of pico) {
+      if (!idx.has(clave)) idx.set(clave, []);
+      idx.get(clave).push(p);
+    }
+  }
+  return idx;
+}
+
+export function candidatosPara(parsed, idx) {
+  const set = new Map();
+  for (const tok of parsed.molTokens) {
+    const clave = expandirAbreviatura(tok);
+    if (clave.length < 3) continue;
+    for (const p of idx.get(clave) || []) {
+      set.set(p.id, { p, coincidencias: (set.get(p.id)?.coincidencias || 0) + 1 });
+    }
+  }
+  // Ordenar por coincidencias desc para evaluar primero los más probables
+  return [...set.values()].sort((a, b) => b.coincidencias - a.coincidencias).map((e) => e.p);
+}
+
+// Score de matching entre descripción COBECA (ya parseada) y un producto DB
+// Combina: nombre comercial (peso alto), molécula (peso medio) y forma (peso medio),
+// y concentración (peso bajo). Devuelve 0..1.
+export function matchScore(descCobeca, productoDb) {
+  const parsed = typeof descCobeca === 'string' ? parsearDescripcion(descCobeca) : descCobeca;
+  const molTokens = parsed.molTokens.map(expandirAbreviatura);
+
+  const nomDb = normalizar(productoDb.nombre_comercial || '');
+  const molDb = limpiarMoleculaDb(productoDb.molecula || '');
+  const formaDb = normalizar(productoDb.forma || '');
+  const labDb = normalizar(productoDb.laboratorio || '');
+
+  let score = 0;
+  let parts = 0;
+
+  // 1) Nombre comercial (marca) — el criterio más fuerte (solo si existe)
+  if (productoDb.nombre_comercial) {
+    const nomScore = scoreNombreComercial(parsed, productoDb.nombre_comercial);
+    score += nomScore * 0.45;
+    parts += 0.45;
+  }
+
+  // 2) Molécula (peso medio) — verifica el fármaco real
+  if (molTokens.length > 0 && molDb) {
+    const molTokensDb = molDb.split(/\s+/);
+    let sum = 0;
+    let n = 0;
+    for (const t of molTokens) {
+      if (!t) continue;
+      // Si el token es el laboratorio y ya lo usamos, lo tratamos más leve
+      if (parsed.labToken && t === parsed.labToken) continue;
+      let best = 0;
+      for (const td of molTokensDb) {
+        const sim = tokenSim(t, td);
+        if (sim > best) best = sim;
+      }
+      sum += best;
+      n++;
+    }
+    if (n > 0) {
+      let molScore = sum / n;
+      if (molDb.includes(molTokens.join(' '))) molScore = 1.0;
+      score += molScore * 0.35;
+      parts += 0.35;
+    }
+  }
+
+  // 3) Forma farmacéutica (peso medio)
+  if (parsed.forma && formaDb) {
+    const formaCobeca = parsed.forma;
+    let formaSim = formaDb.includes(formaCobeca) || formaCobeca.includes(formaDb) ? 1.0 : tokenSim(formaCobeca, formaDb);
+    // Equivalencias (tabletas~comprimidos, suspension~polvo para suspension, etc.)
+    if (formasSonEquivalentes(formaCobeca, formaDb)) {
+      formaSim = 1.0;
+    }
+    score += formaSim * 0.2;
+    parts += 0.2;
+  }
+
+  // 4) Concentración (peso bajo, tolerante) — compara el número clave sin unidad
+  if (parsed.conc && (productoDb.molecula || nomDb)) {
+    const texto = normalizar((productoDb.molecula || '') + ' ' + (productoDb.nombre_comercial || ''));
+    // Extraer el primer número de la concentración COBECA
+    const numMatch = parsed.conc.match(/\d+[.,]?\d*/);
+    if (numMatch) {
+      const numCobeca = numMatch[0].replace(',', '.');
+      // Buscar ese número en el texto DB (con o sin unidad pegada)
+      if (texto.includes(numCobeca) || texto.includes(numCobeca.replace('.', ','))) {
+        score += 0.1;
+      }
+    } else {
+      parts -= 0.1; // sin concentración, no evalúa este criterio
+    }
+    parts += 0.1;
+  }
+
+  // 5) Laboratorio (peso bajo — a veces el lab no concuerda porque COBECA usa marcas)
+  if (parsed.labToken && labDb) {
+    const labCobeca = LAB_ABREV[parsed.labToken] || expandirAbreviatura(parsed.labToken);
+    const labSim = labDb.includes(labCobeca) || labCobeca.includes(labDb) ? 1.0 : tokenSim(labCobeca, labDb);
+    if (labSim > 0.5) {
+      score += labSim * 0.05;
+    }
+    parts += 0.05;
+  }
+
+  return parts > 0 ? score / parts : 0;
+}

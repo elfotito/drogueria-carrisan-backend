@@ -3,7 +3,7 @@
 // Recorre moleculas_referencias, busca cada principio activo en la API pública
 // de CIMA (AEMPS), y hace upsert de la ficha técnica en moleculas_ficha_tecnica.
 
-import { supabase } from '../config/supabase.js';
+import { supabase } from './src/config/supabase.js';
 
 const CIMA_BASE = 'https://cima.aemps.es/cima/rest';
 
