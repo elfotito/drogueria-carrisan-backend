@@ -1,0 +1,17 @@
+﻿import pg from "pg"; import dotenv from "dotenv"; dotenv.config();
+const { Client } = pg;
+const c = new Client({ host: process.env.SUPABASE_DB_HOST, port: process.env.SUPABASE_DB_PORT||5432, database: process.env.SUPABASE_DB_NAME||"postgres", user: process.env.SUPABASE_DB_USER, password: process.env.SUPABASE_DB_PASSWORD, ssl: { rejectUnauthorized:false } });
+await c.connect();
+const q = async (label, sql) => { const r = await c.query(sql); console.log("=== "+label+" ==="); console.log(JSON.stringify(r.rows,null,2)); };
+await q("firma productos_por_atc", `select pg_get_function_arguments(oid) as args, pg_get_function_result(oid) as ret from pg_proc where proname='productos_por_atc'`);
+await q("N01 sample", `select * from public.productos_por_atc(2,'N01') limit 3`);
+await q("N02 sample", `select * from public.productos_por_atc(2,'N02') limit 3`);
+await q("productos con marca", `select count(*)::int as n from productos where marca_id is not null`);
+await q("formas top", `select forma, count(*)::int as n from productos where activo=true group by forma order by n desc limit 8`);
+await q("lineas", `select linea, count(*)::int as n from productos where activo=true group by linea order by n desc`);
+await q("ordenes por estado", `select estado, count(*)::int as n from ordenes group by estado order by n desc`);
+await q("usuarios clientes por tipo", `select tipo, count(*)::int as n from users group by tipo`);
+await q("staff por rol", `select rol, count(*)::int as n from staff group by rol`);
+await q("descuentos activos", `select titulo, alcance, activo from descuentos where activo=true limit 10`);
+await c.end();
+console.log("FIN");

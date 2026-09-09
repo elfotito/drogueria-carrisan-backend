@@ -1,0 +1,17 @@
+﻿import pg from "pg"; import dotenv from "dotenv"; dotenv.config();
+const { Client } = pg;
+const c = new Client({ host: process.env.SUPABASE_DB_HOST, port: process.env.SUPABASE_DB_PORT||5432, database: process.env.SUPABASE_DB_NAME||"postgres", user: process.env.SUPABASE_DB_USER, password: process.env.SUPABASE_DB_PASSWORD, ssl: { rejectUnauthorized:false } });
+await c.connect();
+const staff_rol = await c.query(`select pg_get_constraintdef(oid) from pg_constraint where conrelid='staff'::regclass and contype='c' and conname='staff_rol_check'`);
+console.log("009 staff_rol_check:", staff_rol.rows[0]?.pg_get_constraintdef ?? "NO EXISTE");
+const anul = await c.query(`select count(*)::int as n from information_schema.columns where table_name='ordenes_items' and column_name='anulado'`);
+console.log("010 ordenes_items.anulado:", anul.rows[0].n ? "EXISTE" : "NO EXISTE");
+const fac = await c.query(`select count(*)::int as n from information_schema.columns where table_name='facturas' and column_name='tipo'`);
+console.log("012 facturas.tipo:", fac.rows[0].n ? "EXISTE" : "NO EXISTE");
+const st = await c.query(`select count(*)::int as n from information_schema.columns where table_name in ('requerimientos','cotizaciones','solicitudes_documentos','promociones_plantillas') and column_name='staff_id'`);
+console.log("015 staff_id en 4 tablas:", st.rows[0].n);
+const det = await c.query(`select table_name from information_schema.columns where column_name='staff_id' and table_name in ('requerimientos','cotizaciones','solicitudes_documentos','promociones_plantillas')`);
+console.log("tablas con staff_id:", JSON.stringify(det.rows.map(r=>r.table_name)));
+const pe = await c.query(`select count(*)::int as n from information_schema.tables where table_name='promociones_plantillas_eliminadas'`);
+console.log("015 tabla eliminadas:", pe.rows[0].n ? "EXISTE" : "NO EXISTE");
+await c.end();

@@ -22,6 +22,7 @@ import {
   textoPresentacion,
   asignarSkus,
   packsUnicosPorEf,
+  armarNombrePresentacion,
 } from './reconstruccionHelpers.mjs';
 import { construirIndiceMolecula, rescatarCobeca } from './rescateCobeca.mjs';
 import PROVEEDORES from '../src/config/proveedores.js';
@@ -216,6 +217,7 @@ async function main() {
     const catalogosConId = new Map(); // ef -> base catalogo.id
 
     const clientRows = [];
+    const pulidoRows = []; // renombres aplicados (para reporte CSV del pulido)
     for (const [ef, packs] of porEfPacks) {
       const reg = porEf.get(ef);
       if (!reg) continue;
@@ -224,12 +226,19 @@ async function main() {
         const sku = skus.find((s) => (s.unidades == null ? p.unidades == null : s.unidades === p.unidades))?.sku || skus[skus.length - 1].sku;
         const mols = molesPorCatalogo.get(reg.id) || [];
         const moleculaTexto = mols.map((m) => m.nombre).sort((a, b) => a.localeCompare(b)).join(' - ') || null;
-        const packKey = p.unidades != null ? (p.clavePack || 'TAB') : null;
-        const packText = packKey ? textoPresentacion(p.unidades, packKey) : null;
+        // Nombre comercial pulido: "BASE X {n} {FORMA}" (INYECTABLE -> AMPOLLAS),
+        // en vez de duplicar la forma con el texto del proveedor.
+        const salida = armarNombrePresentacion(reg.nombre, reg.forma || null, p.unidades ?? null);
+        const antes = p.unidades != null
+          ? `${reg.nombre}${p.clavePack ? ' ' + textoPresentacion(p.unidades, p.clavePack) : ''}`
+          : reg.nombre;
+        if (p.unidades != null && salida.nombre !== antes) {
+          pulidoRows.push({ ef, sku, antes, despues: salida.nombre, forma: reg.forma || '', frase: salida.frase || '', flag: salida.limpio ? 'limpio' : 'sin_coincidencia' });
+        }
         clientRows.push({
           sku,
-          nombre_comercial: `${reg.nombre}${packText ? ' ' + packText : ''}`,
-          presentacion: packText || null,
+          nombre_comercial: salida.nombre,
+          presentacion: salida.presentacion,
           unidades_por_presentacion: p.unidades ?? null,
           molecula: moleculaTexto,
           descripcion: reg.principio_activo || null,
@@ -360,6 +369,28 @@ async function main() {
     fs.writeFileSync(path.join(DIR_DATA, `reconstruccion_sin_registro_${fecha}.csv`), csvSinRegistro);
     console.log(`CSV: data/reconstruccion_catalogo_${fecha}.csv (${rechazados.length} filas)`);
     console.log(`CSV: data/reconstruccion_sin_registro_${fecha}.csv (${sinRegistro.length} sin registro)`);
+
+    // --- Reportes del pulido de nombres ---
+    // pulido_nombres: antes vs después de cada producto con presentación (el
+    // dueño revisa los 'sin_coincidencia').
+    const csvPulido = ['ef,sku,nombre_antes,nombre_despues,forma,frase_quitada,flag']
+      .concat(pulidoRows.map((r) => [r.ef, r.sku, r.antes, r.despues, r.forma, r.frase, r.flag].map(csvEscape).join(',')))
+      .join('\n');
+    fs.writeFileSync(path.join(DIR_DATA, `pulido_nombres_${fecha}.csv`), csvPulido);
+    // pulido_sin_pack: productos sin presentación (unidades NULL) — el dueño
+    // los revisa para agregarles unidades/lotes después.
+    const { rows: sinPack } = await client.query(`
+      SELECT fuente_inhrr_ef AS ef, sku, nombre_comercial, forma, costo_usd, precio_usd
+      FROM public.productos
+      WHERE fuente_inhrr_ef IS NOT NULL AND unidades_por_presentacion IS NULL
+      ORDER BY sku
+    `);
+    const csvSinPack = ['ef,sku,nombre_comercial,forma,costo_usd,precio_usd']
+      .concat(sinPack.map((r) => [r.ef, r.sku, r.nombre_comercial, r.forma ?? '', r.costo_usd ?? '', r.precio_usd ?? ''].map(csvEscape).join(',')))
+      .join('\n');
+    fs.writeFileSync(path.join(DIR_DATA, `pulido_sin_pack_${fecha}.csv`), csvSinPack);
+    console.log(`CSV: data/pulido_nombres_${fecha}.csv (${pulidoRows.length} renombres, ${pulidoRows.filter((r) => r.flag === 'sin_coincidencia').length} sin coincidencia)`);
+    console.log(`CSV: data/pulido_sin_pack_${fecha}.csv (${sinPack.length} sin pack, para agregar unidades)`);
     console.log(`Resumen: matched=${matches.length} (${matchesFiltrados.length} tras anti-colisión), sinRegistro=${sinRegistro.length}, rescatadosA=${rescatadosA.length}, aprobados=${aprobadosAplicados}, productos=${nuevos}`);
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});

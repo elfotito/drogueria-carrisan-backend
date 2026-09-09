@@ -76,9 +76,7 @@ async function procesarMolecula(molecula) {
 
   const nregistro = encontrado.nregistro;
   const secciones = await obtenerFichaCompleta(nregistro);
-  const seccion41 = secciones.find(s => s.seccion === '4.1');
-  console.log('  [debug] HTML crudo de 4.1:', JSON.stringify(seccion41?.contenido));
-  console.log('  [debug] códigos de sección:', secciones.map(s => s.seccion)); // TEMPORAL, para diagnosticar
+  
 
       const bloques = new Map(); // columna -> Map(codigoSeccion -> texto)
 
@@ -178,3 +176,8 @@ async function main() {
 
   console.log('\nListo todo el rango solicitado.');
 }
+
+main().catch(err => {
+  console.error('Error fatal:', err);
+  process.exit(1);
+});

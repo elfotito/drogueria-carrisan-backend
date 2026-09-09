@@ -1,0 +1,14 @@
+﻿import pg from "pg"; import dotenv from "dotenv"; dotenv.config();
+const { Client } = pg;
+const c = new Client({ host: process.env.SUPABASE_DB_HOST, port: process.env.SUPABASE_DB_PORT||5432, database: process.env.SUPABASE_DB_NAME||"postgres", user: process.env.SUPABASE_DB_USER, password: process.env.SUPABASE_DB_PASSWORD, ssl: { rejectUnauthorized:false } });
+await c.connect();
+const p = await c.query(`select p.id from productos p join requerimiento_items ri on ri.producto_id = p.id where ri.requerimiento_id = 4`);
+const ids = p.rows.map(r=>r.id);
+console.log("producto E2E:", ids);
+if (ids.length) await c.query(`delete from productos where id = any($1)`, [ids]);
+await c.query(`delete from requerimiento_items where requerimiento_id = 4`);
+const r = await c.query(`delete from requerimientos where id = 4 returning id`);
+console.log("requ borrado:", r.rows[0]?.id ?? "n/a");
+const x = await c.query(`select count(*)::int as n from requerimientos where id=4`);
+console.log("restante:", x.rows[0].n);
+await c.end();

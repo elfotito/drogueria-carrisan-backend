@@ -1,0 +1,11 @@
+﻿import pg from "pg"; import dotenv from "dotenv"; dotenv.config();
+const { Client } = pg;
+const c = new Client({ host: process.env.SUPABASE_DB_HOST, port: process.env.SUPABASE_DB_PORT||5432, database: process.env.SUPABASE_DB_NAME||"postgres", user: process.env.SUPABASE_DB_USER, password: process.env.SUPABASE_DB_PASSWORD, ssl: { rejectUnauthorized:false } });
+await c.connect();
+const cols = await c.query(`select column_name, data_type, is_nullable from information_schema.columns where table_name='notificaciones' order by ordinal_position`);
+console.log("COLUMNAS:"); console.log(cols.rows.map(r=>`  ${r.column_name} ${r.data_type} null=${r.is_nullable}`).join("\n"));
+const chk = await c.query(`select conname, pg_get_constraintdef(oid) from pg_constraint where conrelid='notificaciones'::regclass and contype in ('c','f')`);
+console.log("CONSTRAINTS:"); console.log(chk.rows.map(r=>`  ${r.conname}: ${r.pg_get_constraintdef}`).join("\n"));
+const tipos = await c.query(`select tipo, count(*) from notificaciones group by tipo order by 2 desc`);
+console.log("TIPOS EXISTENTES:"); console.log(tipos.rows.map(r=>`  ${r.tipo} x${r.count}`).join("\n"));
+await c.end();
