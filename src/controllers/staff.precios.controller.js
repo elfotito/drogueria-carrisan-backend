@@ -199,31 +199,43 @@ export async function actualizarPreciosLoteStaff(req, res) {
         return res.status(404).json({ error: `Productos no encontrados: ${faltantes.join(', ')}` });
       }
 
-      const filas = lote.map((it) => {
+      const gruposPorPrecio = new Map();
+      for (const it of lote) {
         const precio = Number(it.precio_usd);
-        return {
-          id: it.id,
-          precio_usd: precio > 0 ? precio : null,
-          disponible: publicarDisponible(precio),
-          updated_at: new Date(),
-        };
-      });
+        const publicar = publicarDisponible(precio);
+        const key = publicar ? `p:${precio}` : '0';
+        if (!gruposPorPrecio.has(key)) {
+          gruposPorPrecio.set(key, {
+            precio_usd: publicar ? precio : null,
+            disponible: publicar,
+            ids: [],
+          });
+        }
+        gruposPorPrecio.get(key).ids.push(it.id);
+      }
 
-      const { data: resultado, error } = await supabase
-        .from('productos')
-        .upsert(filas, { onConflict: 'id' })
-        .select('id, nombre_comercial, precio_usd');
-      if (error) throw error;
+      for (const grupo of gruposPorPrecio.values()) {
+        const { data: resultado, error } = await supabase
+          .from('productos')
+          .update({
+            precio_usd: grupo.precio_usd,
+            disponible: grupo.disponible,
+            updated_at: new Date(),
+          })
+          .in('id', grupo.ids)
+          .select('id, nombre_comercial, precio_usd');
+        if (error) throw error;
 
-      for (const fila of resultado || []) {
-        actualizados++;
-        const teniaPrecio = Number(presentes.get(fila.id)?.precio_usd) > 0;
-        if (fila.precio_usd != null && Number(fila.precio_usd) > 0) {
-          publicados++;
-          if (!teniaPrecio) {
-            notificarDisponibles(fila).catch((err) =>
-              console.error('Error al notificar disponibilidad:', err)
-            );
+        for (const fila of resultado || []) {
+          actualizados++;
+          const teniaPrecio = Number(presentes.get(fila.id)?.precio_usd) > 0;
+          if (fila.precio_usd != null && Number(fila.precio_usd) > 0) {
+            publicados++;
+            if (!teniaPrecio) {
+              notificarDisponibles(fila).catch((err) =>
+                console.error('Error al notificar disponibilidad:', err)
+              );
+            }
           }
         }
       }

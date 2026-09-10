@@ -349,25 +349,34 @@ export async function preciosBulkUpdate(req, res) {
 
       const precioAnteriorPorId = new Map((previos || []).map((p) => [p.id, p.precio_usd]));
 
-      const { data: actualizados, error } = await supabase
-        .from('productos')
-        .upsert(
-          lote.map((it) => {
-            const precio = Number(it.precio_usd);
-            const publicar = precio > 0;
-            return {
-              id: it.id,
-              precio_usd: publicar ? precio : null,
-              disponible: publicar,
-              updated_at: new Date(),
-            };
-          }),
-          { onConflict: 'id' }
-        )
-        .select('*');
-      if (error) throw error;
+      const gruposPorPrecio = new Map();
+      for (const it of lote) {
+        const precio = Number(it.precio_usd);
+        const publicar = precio > 0;
+        const key = publicar ? `p:${precio}` : '0';
+        if (!gruposPorPrecio.has(key)) {
+          gruposPorPrecio.set(key, {
+            precio_usd: publicar ? precio : null,
+            disponible: publicar,
+            ids: [],
+          });
+        }
+        gruposPorPrecio.get(key).ids.push(it.id);
+      }
 
-      for (const fila of actualizados || []) {
+      for (const grupo of gruposPorPrecio.values()) {
+        const { data: actualizados, error } = await supabase
+          .from('productos')
+          .update({
+            precio_usd: grupo.precio_usd,
+            disponible: grupo.disponible,
+            updated_at: new Date(),
+          })
+          .in('id', grupo.ids)
+          .select('id, nombre_comercial, precio_usd');
+        if (error) throw error;
+
+        for (const fila of actualizados || []) {
         aplicados++;
         const teniaPrecio = precioAnteriorPorId.get(fila.id) && Number(precioAnteriorPorId.get(fila.id)) > 0;
         if (fila.precio_usd && Number(fila.precio_usd) > 0) {
@@ -381,6 +390,7 @@ export async function preciosBulkUpdate(req, res) {
           }
         } else {
           despublicados++;
+        }
         }
       }
     }
