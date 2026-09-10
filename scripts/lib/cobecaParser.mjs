@@ -334,10 +334,12 @@ export function detectarConcDecimal(desc) {
 }
 
 // Detecta concentración combinada en la descripción cruda, ej. "5/6,25MG",
-// "10/6,25MG", "5 - 6,25 mg". Devuelve { a, b, unidad } o null.
+// "2,5MG/6,25MG", "10/6,25MG", "5 - 6,25 mg". Devuelve { a, b, unidad } o null.
+// La segunda unidad debe ser de dosis sólida (mg/g/ug/mcg/iu/ui): "250MG/5ML"
+// (concentración en volumen de suspensión) NO es una combinación de principios.
 export function detectarConcCombo(desc) {
   const m = String(desc || '').match(
-    /(\d+[.,]?\d*)\s*[/-]\s*(\d+[.,]?\d*)\s*(mg|ml|g|ug|iu|mcg|ui|%)/i
+    /(\d+(?:[.,]\d+)?)\s*(?:mg|g|ug|mcg|iu|ui)?\s*[/-]\s*(\d+(?:[.,]\d+)?)\s*(mg|g|ug|mcg|iu|ui)/i
   );
   if (!m) return null;
   return {
@@ -390,7 +392,14 @@ export function parsearDescripcion(desc) {
     // Tokens que solo son puntuación o volumen -> saltar (200ML, 30ML, etc.)
     if (/^\d+ml$/.test(tok)) { concParts.push(tok); continue; }
     if (/^\d+%.*/.test(tok)) { continue; }
-    if (/^\d+$/.test(tok)) { continue; } // números sueltos (cantidad de unidades)
+    // Número + unidad como token independiente ("5 MG X 10"): concentración con
+    // espacio entre el número y la unidad. Se une antes de descartar el número.
+    if (/^\d+(?:[.,]\d+)?$/.test(tok) && i + 1 < rawTokens.length && /^(mg|ml|g|ug|iu|mcg|ui|%)$/.test(rawTokens[i + 1])) {
+      concParts.push(`${tok}${rawTokens[i + 1]}`);
+      i++;
+      continue;
+    }
+    if (/^\d+$/.test(tok)) continue; // números sueltos (cantidad de unidades)
 
     // Stopwords (ruido de marca/presentación) que no aportan a la molécula
     if (STOPWORDS.has(tok)) continue;
@@ -564,6 +573,77 @@ export function candidatosPara(parsed, idx) {
   return [...set.values()].sort((a, b) => b.coincidencias - a.coincidencias).map((e) => e.p);
 }
 
+// Dosis reales de un producto DB: extrae del molecula + nombre_comercial los
+// valores numéricos de dosis con su unidad. Reconstruye decimales (normalizar
+// borró la coma: "2,5 mg" quedó "2 5 mg", "1,25mg" quedó "1 25mg") de modo que
+// el "5" de "2,5" NUNCA aparezca como dosis 5 mg (colisión que pegaba fotos de
+// 5MG sobre productos de 2,5 mg).
+export function dosisProductoDb(productoDb) {
+  const texto = normalizar(`${productoDb.molecula || ''} ${productoDb.nombre_comercial || ''}`);
+  const tokens = texto.split(/\s+/);
+  const UNIDAD_DOSIS = /^(mg|g|ml|ug|mcg|iu|ui|%)$/;
+  const dosis = new Set();
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i] || '';
+    let dosisVal = null;
+    // "25mg" — número con unidad pegada
+    const mUni = /^(\d+(?:[.,]\d+)?)(mg|g|ml|ug|mcg|iu|ui|%)$/.exec(tok);
+    if (mUni) {
+      dosisVal = Number(mUni[1].replace(',', '.'));
+    } else {
+      const mNum = /^(\d+(?:[.,]\d+)?)$/.exec(tok);
+      if (mNum) {
+        const val = Number(mNum[1].replace(',', '.'));
+        const sig = i + 1 < tokens.length ? tokens[i + 1] : '';
+        // "5 mg" → 5 (unidad suelta al lado)
+        if (UNIDAD_DOSIS.test(sig)) {
+          dosisVal = val;
+        } else {
+          // Decimal partido: "2 5 mg" ó "2 5mg" → 2.5
+          const sigNum = /^(\d+(?:[.,]\d+)?)(mg|g|ml|ug|mcg|iu|ui|%)?$/.exec(sig);
+          const unidadDosPuntos = i + 2 < tokens.length ? UNIDAD_DOSIS.test(tokens[i + 2] || '') : false;
+          if (sigNum && sigNum[1] && (sigNum[2] || unidadDosPuntos)) {
+            const fracStr = sigNum[1].replace(',', '.');
+            const frac = Number(fracStr);
+            const decimales = (fracStr.split('.')[1] || fracStr).length;
+            dosisVal = val + frac / Math.pow(10, decimales);
+            i += 1; // consumir el siguiente token (su unidad ya forma parte del valor)
+          }
+        }
+      }
+    }
+    if (dosisVal != null && isFinite(dosisVal) && dosisVal > 0 && dosisVal <= 5000) {
+      dosis.add(Math.round(dosisVal * 100000) / 100000);
+    }
+  }
+  return dosis;
+}
+
+// ¿La descripción COBECA es una combinación (HCT/doble dosis)? p.ej.
+// "ANTAAR/HCT TAB 5MG/6,25MG", "BIOTALOL HCT". NO se usa la letra suelta
+// ("ANG/H", "L.O"): la mayoría son ruido de laboratorio, no combinaciones.
+export function esComboCobeca(parsed, descRaw) {
+  if (parsed.combo) return true;
+  const low = String(descRaw || '').toLowerCase();
+  if (/(?:^|[^a-z])hct(?:[^a-z]|$)/.test(low)) return true;
+  if (/(\d+(?:[.,]\d+)?)\s*(?:mg|g|ug|mcg|iu|ui)\s*[-/]\s*(\d+(?:[.,]\d+)?)\s*(?:mg|g|ug|mcg|iu|ui|%)?/.test(low)) return true;
+  return false;
+}
+
+// ¿El producto DB es una combinación? (doble dosis en el nombre, marcador
+// hct/pe/h, o molécula compuesta con " - ").
+export function esComboProducto(productoDb) {
+  const nom = `${productoDb.nombre_comercial || ''} ${productoDb.molecula || ''}`;
+  const low = nom.toLowerCase();
+  if (/(\d+(?:[.,]\d+)?)\s*(?:mg|g|ug|mcg|iu|ui)\s*[-/]\s*(\d+(?:[.,]\d+)?)\s*(?:mg|g|ug|mcg|iu|ui|%)?/.test(low)) return true;
+  if (/(?:^|[^a-z])hct(?:[^a-z]|$)/.test(low)) return true;
+  if (/(?:^|[^a-z])pe(?:[^a-z]|$)/.test(low)) return true;
+  const norm = normalizar(nom);
+  if (/\bh\b/.test(norm)) return true;
+  if (/\s-\s/.test(normalizar(productoDb.molecula || ''))) return true;
+  return false;
+}
+
 // Score de matching entre descripción COBECA (ya parseada) y un producto DB
 // Combina: nombre comercial (peso alto), molécula (peso medio) y forma (peso medio),
 // concentración (peso bajo) y pack size (desempate). Devuelve 0..1.
@@ -581,6 +661,13 @@ export function matchScore(descCobeca, productoDb) {
 
   let score = 0;
   let parts = 0;
+
+  // Discriminación mono↔combinación: una descripción COBECA de combinación
+  // (HCT, PE, doble dosis) NO debe pegarse a un producto de una sola molécula,
+  // y viceversa (un foto de mono NUNCA debe caer en HCT).
+  const comboCobeca = esComboCobeca(parsed, descRaw);
+  const comboDb = esComboProducto(productoDb);
+  if (comboCobeca !== comboDb) return -1;
 
   // 1) Nombre comercial (marca) — el criterio más fuerte (solo si existe)
   if (productoDb.nombre_comercial) {
@@ -626,52 +713,27 @@ export function matchScore(descCobeca, productoDb) {
     parts += 0.2;
   }
 
-  // 4) Concentración (peso bajo, tolerante) — compara el número clave sin unidad
+  // 4) Concentración (peso bajo) — la dosis COBECA debe existir entre las dosis
+  //    del producto DB (parseadas para evitar la colisión de decimales: en
+  //    "2,5 mg" el "5" NUNCA debe contar como dosis 5 mg).
   let dosisDiscordante = false;
   if (parsed.conc && (productoDb.molecula || nomDb)) {
-    const texto = normalizar((productoDb.molecula || '') + ' ' + (productoDb.nombre_comercial || ''));
     const numCobeca = (parsed.conc.match(/\d+[.,]?\d*/) || [''])[0].replace(',', '.');
     const numCobecaB = parsed.conc2 ? (parsed.conc2.match(/\d+[.,]?\d*/) || [''])[0].replace(',', '.') : null;
-
-    // Extraer TODOS los números del texto DB como valores numéricos para un
-    // match exacto (evita que "5" matchee dentro de "25" de "6,25mg").
-    const numsDb = [...texto.matchAll(/\d+(?:[.,]\d+)?/g)].map(m => m[0].replace(',', '.'));
-    const numDbSet = new Set(numsDb.map(Number));
     const numCobEval = Number(numCobeca);
-
-    // Un punto decimal (1,25) NO debe equipararse con 1 o 25. El texto DB está
-    // normalizado (comas y puntos → espacio), así que "1,25 mg" DB se ve "1 25".
-    // Se busca el patrón "entero frac" (p.ej. "1 25") dentro del texto DB.
-    const esDecimal = numCobeca.includes('.');
-    let concMatch = false;
-    if (esDecimal) {
-      const [entero, frac] = numCobeca.split('.');
-      concMatch = numDbSet.has(numCobEval) || texto.includes(`${entero} ${frac}`);
-    } else if (numDbSet.has(numCobEval)) {
-      concMatch = true;
-    }
+    const dosisDb = dosisProductoDb(productoDb);
+    const concMatch = isFinite(numCobEval) && dosisDb.has(numCobEval);
 
     // Dosis discordante: la descripción COBECA declara una dosis y el producto DB
-    // declara una DISTINTA (p.ej. COBECA "2,5MG" → producto "10 MG"). Rechaza el
-    // match para no pegar fotos de presentaciones que no existen en la BD (el
-    // producto 2,5 no existe; la foto no debe caer en el de 10 mg).
-    const tokensTexto = texto.split(/\s+/);
-    let dosisDeclaradaDb = false;
-    for (let i = 0; i < tokensTexto.length - 1; i++) {
-      const t = tokensTexto[i];
-      const sig = tokensTexto[i + 1];
-      if (/^\d+(?:[.,]\d+)?$/.test(t) && ['mg', 'g', 'ml', 'ug', 'mcg', 'iu', 'ui'].includes(sig)) {
-        dosisDeclaradaDb = true;
-        break;
-      }
-    }
-    if (!concMatch && dosisDeclaradaDb) {
-      dosisDiscordante = true; // misma marca, dosis diferente → no es el producto
+    // declara dosis DISTINTAS (p.ej. COBECA "5MG" → producto "2,5 mg"). Rechaza el
+    // match para no pegar fotos de presentaciones que no existen en la BD.
+    if (!concMatch && dosisDb.size > 0) {
+      dosisDiscordante = true;
     }
     if (concMatch) score += 0.1;
 
     // Concentración combinada: si el segundo valor también aparece, refuerza
-    if (numCobecaB && !isNaN(Number(numCobecaB)) && numDbSet.has(Number(numCobecaB))) {
+    if (numCobecaB && dosisDb.has(Number(numCobecaB))) {
       score += 0.05;
     }
     parts += 0.1;
@@ -699,20 +761,6 @@ export function matchScore(descCobeca, productoDb) {
       }
       // Si no coinciden, no se suma nada (penaliza relativo al que sí coincide)
       parts += 0.15;
-    }
-  }
-
-  // 7) Variante de marca (p.ej. "H" en CORENTEL H) — discriminante: si la
-  //    descripción COBECA la trae, el producto DB debe tenerla. Productos sin la
-  //    variante quedan por debajo aunque el nombre base coincida.
-  if (parsed.variante) {
-    const tokensDb = nomDb.split(/\s+/);
-    const tieneVariante = tokensDb.includes(parsed.variante);
-    parts += 0.1;
-    if (tieneVariante) {
-      score += 0.1;
-    } else {
-      score -= 0.15; // penaliza fuerte: "CORENTEL" no debe ganarle a "CORENTEL H"
     }
   }
 
