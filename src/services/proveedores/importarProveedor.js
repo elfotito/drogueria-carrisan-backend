@@ -108,6 +108,7 @@ function leerFilas(proveedor, buffer) {
 
 export function enlazarCOBECA(fila, productos, idx) {
   const parsed = parsearDescripcion(fila.desc);
+  parsed._raw = fila.desc; // para que matchScore extraiga pack
   if (!parsed.forma) return { estado: 'no_farmaco' };
 
   const candidatos = candidatosPara(parsed, idx);
@@ -118,14 +119,12 @@ export function enlazarCOBECA(fila, productos, idx) {
     if (s > bestScore) { bestScore = s; best = p; }
   }
   if (best) {
-    let reemplazo = null;
+    // Preferir candidatos con ancla, pero SOLO si mejoran el score actual
     for (const p of candidatos) {
       if (!tieneAncla(parsed, p)) continue;
       const sp = matchScore(parsed, p);
-      if (reemplazo === null || sp > matchScore(parsed, reemplazo)) reemplazo = p;
+      if (sp > bestScore) { bestScore = sp; best = p; }
     }
-    best = reemplazo || null;
-    bestScore = reemplazo ? matchScore(parsed, reemplazo) : 0;
   }
   if (best && bestScore >= UMBRAL_COBECA) {
     return { estado: 'matched', producto: best, score: bestScore };

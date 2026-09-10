@@ -174,19 +174,81 @@ export async function getMoleculas(req, res) {
 }
 
 // GET /moleculas/:id
+// Ficha completa de una molécula (vademécum). Responde de forma aditiva:
+// mantiene los campos originales (incluido `atc_clasificaciones`) y agrega:
+//   atc_arbol      -> cadena de ascendientes ATC (nivel 5 -> ... -> nivel 1)
+//   ficha_tecnica  -> secciones CIMA de moleculas_ficha_tecnica (null si no existe)
+//   productos      -> productos del catálogo INHRR que la usan (paginados)
+//   paginacion     -> info de paginacion de los productos
 export async function getMoleculaById(req, res) {
   const { id } = req.params;
+  const pagina = Math.max(1, parseInt(req.query.pagina, 10) || 1);
+  const porPagina = Math.min(100, Math.max(1, parseInt(req.query.por_pagina, 10) || 50));
+
+  // Árbol ATC anidado: nivel5 -> padre -> ... -> nivel1 (5 niveles máx.)
+  const ATC_SELECT = `atc_clasificaciones(
+    id, codigo, nombre, nivel, padre_id,
+    padre:padre_id(id, codigo, nombre, nivel, padre_id,
+      padre:padre_id(id, codigo, nombre, nivel, padre_id,
+        padre:padre_id(id, codigo, nombre, nivel, padre_id,
+          padre:padre_id(id, codigo, nombre, nivel, padre_id)))))`;
+
   try {
-    const { data, error } = await supabase
-      .from('moleculas_referencias')
-      .select('*, atc_clasificaciones(id, codigo, nombre, nivel)')
-      .eq('id', id)
-      .single();
+    const [{ data, error }, fichaQuery, productosQuery] = await Promise.all([
+      supabase
+        .from('moleculas_referencias')
+        .select(`*, ${ATC_SELECT}`)
+        .eq('id', id)
+        .single(),
+      supabase
+        .from('moleculas_ficha_tecnica')
+        .select('*')
+        .eq('molecula_id', id)
+        .maybeSingle(),
+      supabase
+        .from('catalogo_moleculas')
+        .select('productos_catalogo(sku, ef, nombre, forma, categoria, laboratorio)', { count: 'exact' })
+        .eq('molecula_id', id)
+        .order('id', { ascending: true })
+        .range((pagina - 1) * porPagina, pagina * porPagina - 1),
+    ]);
 
     if (error || !data) {
       return res.status(404).json({ error: 'Molécula no encontrada' });
     }
-    res.json(data);
+    if (fichaQuery.error) throw fichaQuery.error;
+    if (productosQuery.error) throw productosQuery.error;
+
+    // aplanar árbol en cadena ascendente (nivel 1 -> ... -> nivel 5) si existe
+    const atcArbol = [];
+    let nodo = data.atc_clasificaciones;
+    while (nodo) {
+      atcArbol.unshift({ id: nodo.id, codigo: nodo.codigo, nombre: nodo.nombre, nivel: nodo.nivel });
+      nodo = nodo.padre;
+    }
+
+    const productos = (productosQuery.data || [])
+      .map((r) => r.productos_catalogo)
+      .filter(Boolean);
+
+    res.json({
+      id: data.id,
+      atc_id: data.atc_id,
+      nombre: data.nombre,
+      nombre_generico_en: data.nombre_generico_en,
+      sinonimos: data.sinonimos,
+      descripcion: data.descripcion,
+      atc_clasificaciones: data.atc_clasificaciones,
+      atc_arbol: atcArbol,
+      ficha_tecnica: fichaQuery.data || null,
+      productos,
+      paginacion: {
+        total: productosQuery.count || 0,
+        pagina,
+        por_pagina: porPagina,
+        total_paginas: Math.ceil((productosQuery.count || 0) / porPagina),
+      },
+    });
   } catch (err) {
     console.error('Error al obtener molécula:', err);
     res.status(500).json({ error: 'Error del servidor' });

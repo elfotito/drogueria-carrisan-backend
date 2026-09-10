@@ -41,7 +41,7 @@ const dump = JSON.parse(fs.readFileSync(path.join(DATA, 'moleculas_referencias_d
 const atcCSV = fs.readFileSync(path.join(DATA, 'atc_clasificaciones_import.csv'), 'utf-8');
 const nivel5 = atcCSV.trim().split('\n').slice(1).map((l) => {
   const i = l.indexOf(','); const resto = l.slice(i + 1); const j = resto.indexOf(',');
-  return { codigo: l.slice(0, i), nombre: resto.slice(0, j), nivel: Number(resto.slice(j + 1).split(',')[0]) };
+  return { codigo: l.slice(0, i).trim(), nombre: resto.slice(0, j).trim(), nivel: Number(resto.slice(j + 1).split(',')[0]) };
 }).filter((a) => a.nivel === 5);
 
 const noMatch = leerCSV('catalogo_moleculas_no_match.csv').map((r) => r.mol_inhrr.toUpperCase());
@@ -70,11 +70,10 @@ function mejorContra(nombre, idx, lista) {
   const toks = tokensSignificativos(nombre);
   const candSet = new Set();
   for (const t of toks) for (const i of (idx.get(t) || [])) candSet.add(i);
-  let best = { score: 0, cand: '' };
+  let best = { score: 0, idx: -1 };
   for (const i of candSet) {
-    const cand = lista[i];
-    const sc = scoreMoleculas(nombre, cand);
-    if (sc > best.score) best = { score: sc, cand };
+    const sc = scoreMoleculas(nombre, lista[i]);
+    if (sc > best.score) best = { score: sc, idx: i };
   }
   return best;
 }
@@ -84,13 +83,18 @@ for (const p of pendientes) {
   const origen = noMatch.includes(p) ? 'no_match' : 'revisar';
   const bRefs = mejorContra(p, idxRefs, refs.map((r) => [r.nombre, ...r.sinonimos].join(' ³ ')));
   const bAtc = mejorContra(p, idxAtc, nivel5.map((a) => a.nombre));
+  const ref = bRefs.idx >= 0 ? refs[bRefs.idx] : null;
+  const atcObj = bAtc.idx >= 0 ? nivel5[bAtc.idx] : null;
   const estado = bRefs.score >= UMBRAL_AUTO_REFS ? 'auto_refs'
     : bRefs.score >= 0.75 ? 'banda_refs'
     : bAtc.score >= UMBRAL_ATC ? 'propuesta_atc' : 'sin_candidato';
   filas.push({
     mol_inhrr: p, origen, estado,
-    score_refs: (+bRefs.score).toFixed(3), candidato_refs: bRefs.cand,
-    score_atc: (+bAtc.score).toFixed(3), codigo_atc: bAtc.cand.split(' ')[0] || '', candidato_atc: bAtc.cand.split(' ').slice(1).join(' ') || bAtc.cand,
+    score_refs: (+bRefs.score).toFixed(3),
+    candidato_refs: ref ? [ref.nombre, ...ref.sinonimos].join(' ³ ') : '',
+    score_atc: (+bAtc.score).toFixed(3),
+    codigo_atc: atcObj ? atcObj.codigo : '',
+    candidato_atc: atcObj ? atcObj.nombre : '',
   });
 }
 

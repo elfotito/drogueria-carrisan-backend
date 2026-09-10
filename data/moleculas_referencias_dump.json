@@ -311,8 +311,8 @@
     "nombre_generico_en": "Calcium Acetate",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "6762",
+    "atc_codigo": "V03AE07"
   },
   {
     "id": "36",
@@ -446,8 +446,8 @@
     "nombre_generico_en": "Acetohydroxamic Acid",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "2995",
+    "atc_codigo": "G04BX03"
   },
   {
     "id": "51",
@@ -455,8 +455,8 @@
     "nombre_generico_en": "Zinc",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "164",
+    "atc_codigo": "A02BX91"
   },
   {
     "id": "52",
@@ -1067,8 +1067,8 @@
     "nombre_generico_en": "Aldesleukin",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "4376",
+    "atc_codigo": "L03AC01"
   },
   {
     "id": "120",
@@ -1130,8 +1130,8 @@
     "nombre_generico_en": "Alendronic Acid",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "4826",
+    "atc_codigo": "M05BA04"
   },
   {
     "id": "127",
@@ -1238,8 +1238,8 @@
     "nombre_generico_en": "Alginic Acid",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "159",
+    "atc_codigo": "A02BX13"
   },
   {
     "id": "139",
@@ -1346,8 +1346,8 @@
     "nombre_generico_en": null,
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "1140",
+    "atc_codigo": "B05AA07"
   },
   {
     "id": "151",
@@ -1823,8 +1823,8 @@
     "nombre_generico_en": "Aminolevulinic Acid",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "4167",
+    "atc_codigo": "L01XD04"
   },
   {
     "id": "204",
@@ -3245,8 +3245,8 @@
     "nombre_generico_en": "Azelaic Acid",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "2619",
+    "atc_codigo": "D10AX03"
   },
   {
     "id": "362",
@@ -3695,8 +3695,8 @@
     "nombre_generico_en": "Bempedoic Acid",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "2086",
+    "atc_codigo": "C10AX15"
   },
   {
     "id": "412",
@@ -3974,8 +3974,8 @@
     "nombre_generico_en": "Benzbromarone",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "4808",
+    "atc_codigo": "M04AB03"
   },
   {
     "id": "443",
@@ -5666,8 +5666,8 @@
     "nombre_generico_en": "Carglumic Acid",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "845",
+    "atc_codigo": "A16AA05"
   },
   {
     "id": "631",
@@ -6854,8 +6854,8 @@
     "nombre_generico_en": "Cinnarizine",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "5639",
+    "atc_codigo": "N07CA02"
   },
   {
     "id": "763",
@@ -9248,8 +9248,8 @@
     "nombre_generico_en": "Iocetamic Acid",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "2679",
+    "atc_codigo": "D11AX24"
   },
   {
     "id": "1029",
@@ -9554,8 +9554,8 @@
     "nombre_generico_en": "Diatrizoic Acid",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "6909",
+    "atc_codigo": "V08AA01"
   },
   {
     "id": "1063",
@@ -9689,8 +9689,8 @@
     "nombre_generico_en": "Dichlorobenzyl Alcohol",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "5921",
+    "atc_codigo": "R02AA03"
   },
   {
     "id": "1078",
@@ -12137,8 +12137,8 @@
     "nombre_generico_en": "Etidronic Acid",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "4823",
+    "atc_codigo": "M05BA01"
   },
   {
     "id": "1350",
@@ -13262,8 +13262,8 @@
     "nombre_generico_en": "Flufenamic Acid",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "4633",
+    "atc_codigo": "M01AG03"
   },
   {
     "id": "1475",
@@ -14063,8 +14063,8 @@
     "nombre_generico_en": "Iocetamic Acid",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "2307",
+    "atc_codigo": "D05AX01"
   },
   {
     "id": "1564",
@@ -14090,8 +14090,8 @@
     "nombre_generico_en": "Furosemide",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "1608",
+    "atc_codigo": "C03CA01"
   },
   {
     "id": "1567",
@@ -15116,8 +15116,8 @@
     "nombre_generico_en": "Human Chorionic Gonadotropin",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "2931",
+    "atc_codigo": "G03GA01"
   },
   {
     "id": "1681",
@@ -15134,8 +15134,8 @@
     "nombre_generico_en": "Human Chorionic Gonadotropin",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "2933",
+    "atc_codigo": "G03GA03"
   },
   {
     "id": "1683",
@@ -16259,8 +16259,8 @@
     "nombre_generico_en": "Ibandronic Acid",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "4828",
+    "atc_codigo": "M05BA06"
   },
   {
     "id": "1808",
@@ -17672,8 +17672,8 @@
     "nombre_generico_en": "Iron",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "1074",
+    "atc_codigo": "B03AA91"
   },
   {
     "id": "1965",
@@ -17699,8 +17699,8 @@
     "nombre_generico_en": "Lactic Acid",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "2712",
+    "atc_codigo": "G01AD01"
   },
   {
     "id": "1968",
@@ -18041,8 +18041,8 @@
     "nombre_generico_en": "Laronidase",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "853",
+    "atc_codigo": "A16AB05"
   },
   {
     "id": "2006",
@@ -18149,8 +18149,8 @@
     "nombre_generico_en": "Ganciclovir Sodium",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "6670",
+    "atc_codigo": "S02DA93"
   },
   {
     "id": "2018",
@@ -19751,8 +19751,8 @@
     "nombre_generico_en": "Methylene Blue",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "338",
+    "atc_codigo": "A05AX04"
   },
   {
     "id": "2196",
@@ -19931,8 +19931,8 @@
     "nombre_generico_en": "Mefenamic Acid",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "4631",
+    "atc_codigo": "M01AG01"
   },
   {
     "id": "2216",
@@ -20309,8 +20309,8 @@
     "nombre_generico_en": "Merbromin",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "2538",
+    "atc_codigo": "D08AK04"
   },
   {
     "id": "2258",
@@ -20849,8 +20849,8 @@
     "nombre_generico_en": "Epoetin Beta",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "1129",
+    "atc_codigo": "B03XA03"
   },
   {
     "id": "2318",
@@ -22415,8 +22415,8 @@
     "nombre_generico_en": "Niacinamide",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "728",
+    "atc_codigo": "A11HA01"
   },
   {
     "id": "2492",
@@ -23792,8 +23792,8 @@
     "nombre_generico_en": "Pamidronic Acid",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "4825",
+    "atc_codigo": "M05BA03"
   },
   {
     "id": "2645",
@@ -24206,8 +24206,8 @@
     "nombre_generico_en": "Patiromer",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "6763",
+    "atc_codigo": "V03AE09"
   },
   {
     "id": "2692",
@@ -24323,8 +24323,8 @@
     "nombre_generico_en": "Pegvisomant",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "3046",
+    "atc_codigo": "H01AX01"
   },
   {
     "id": "2705",
@@ -24845,8 +24845,8 @@
     "nombre_generico_en": "Calcium",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "764",
+    "atc_codigo": "A12AA91"
   },
   {
     "id": "2763",
@@ -25160,8 +25160,8 @@
     "nombre_generico_en": null,
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "2669",
+    "atc_codigo": "D11AX12"
   },
   {
     "id": "2798",
@@ -27068,8 +27068,8 @@
     "nombre_generico_en": "Sodium Acetate",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "3487",
+    "atc_codigo": "J02AX08"
   },
   {
     "id": "3010",
@@ -27338,8 +27338,8 @@
     "nombre_generico_en": "Risedronic Acid",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "4829",
+    "atc_codigo": "M05BA07"
   },
   {
     "id": "3040",
@@ -29867,8 +29867,8 @@
     "nombre_generico_en": null,
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "4560",
+    "atc_codigo": "L04AX10"
   },
   {
     "id": "3321",
@@ -30659,8 +30659,8 @@
     "nombre_generico_en": "Thioctic Acid",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "878",
+    "atc_codigo": "A16AX01"
   },
   {
     "id": "3409",
@@ -31307,8 +31307,8 @@
     "nombre_generico_en": "Tranexamic Acid",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "998",
+    "atc_codigo": "B02AA02"
   },
   {
     "id": "3481",
@@ -32018,8 +32018,8 @@
     "nombre_generico_en": "Ursodiol",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "328",
+    "atc_codigo": "A05AA02"
   },
   {
     "id": "3560",
@@ -32342,8 +32342,8 @@
     "nombre_generico_en": "Valproic Acid",
     "sinonimos": [],
     "descripcion": null,
-    "atc_id": null,
-    "atc_codigo": null
+    "atc_id": "5150",
+    "atc_codigo": "N03AG01"
   },
   {
     "id": "3596",
@@ -38077,5 +38077,569 @@
     "descripcion": null,
     "atc_id": null,
     "atc_codigo": null
+  },
+  {
+    "id": "4233",
+    "nombre": "Valsartan y sacubitrilo",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Sacubitrilo valsartan sodico hidratado",
+      "Sacubitrilo valsartan"
+    ],
+    "descripcion": null,
+    "atc_id": "1998",
+    "atc_codigo": "C09DX04"
+  },
+  {
+    "id": "4234",
+    "nombre": "Sultamicilina",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Sultamicilina"
+    ],
+    "descripcion": null,
+    "atc_id": "3249",
+    "atc_codigo": "J01CR04"
+  },
+  {
+    "id": "4235",
+    "nombre": "Clenbuterol",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Clenbuterol"
+    ],
+    "descripcion": null,
+    "atc_id": "5974",
+    "atc_codigo": "R03AC14"
+  },
+  {
+    "id": "4236",
+    "nombre": "Sucralfato",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Sucralfato"
+    ],
+    "descripcion": null,
+    "atc_id": "148",
+    "atc_codigo": "A02BX02"
+  },
+  {
+    "id": "4237",
+    "nombre": "Ciprofibrato",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Ciprofibrato"
+    ],
+    "descripcion": null,
+    "atc_id": "2034",
+    "atc_codigo": "C10AB08"
+  },
+  {
+    "id": "4238",
+    "nombre": "Cefoperazona",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Cefoperazona"
+    ],
+    "descripcion": null,
+    "atc_id": "3289",
+    "atc_codigo": "J01DD12"
+  },
+  {
+    "id": "4239",
+    "nombre": "Fenoterol",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Fenoterol bromhidrato"
+    ],
+    "descripcion": null,
+    "atc_id": "2787",
+    "atc_codigo": "G02CA03"
+  },
+  {
+    "id": "4240",
+    "nombre": "Cefradina",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Cefradina"
+    ],
+    "descripcion": null,
+    "atc_id": "3262",
+    "atc_codigo": "J01DB09"
+  },
+  {
+    "id": "4241",
+    "nombre": "Dihidroergotamina",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Dihidroergotamina",
+      "Mesilato de dihidroergotamina"
+    ],
+    "descripcion": null,
+    "atc_id": "5079",
+    "atc_codigo": "N02CA01"
+  },
+  {
+    "id": "4242",
+    "nombre": "Furazolidona",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Furazolidona"
+    ],
+    "descripcion": null,
+    "atc_id": "2745",
+    "atc_codigo": "G01AX06"
+  },
+  {
+    "id": "4243",
+    "nombre": "Molgramostim",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Molgramostim"
+    ],
+    "descripcion": null,
+    "atc_id": "4349",
+    "atc_codigo": "L03AA03"
+  },
+  {
+    "id": "4244",
+    "nombre": "Policresuleno",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Policresuleno"
+    ],
+    "descripcion": null,
+    "atc_id": "2505",
+    "atc_codigo": "D08AE02"
+  },
+  {
+    "id": "4245",
+    "nombre": "Timoestimulina",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Timoestimulina"
+    ],
+    "descripcion": null,
+    "atc_id": "4402",
+    "atc_codigo": "L03AX94"
+  },
+  {
+    "id": "4246",
+    "nombre": "Trifluoperazina",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Trifluoperazina",
+      "Trifluoperazina clorhidrato"
+    ],
+    "descripcion": null,
+    "atc_id": "5239",
+    "atc_codigo": "N05AB06"
+  },
+  {
+    "id": "4247",
+    "nombre": "Buspirona",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Buspirona"
+    ],
+    "descripcion": null,
+    "atc_id": "5355",
+    "atc_codigo": "N05BE01"
+  },
+  {
+    "id": "4248",
+    "nombre": "Carisoprodol",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Carisoprodol"
+    ],
+    "descripcion": null,
+    "atc_id": "4764",
+    "atc_codigo": "M03BA02"
+  },
+  {
+    "id": "4249",
+    "nombre": "Etamsilato",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Etamsilato"
+    ],
+    "descripcion": null,
+    "atc_id": "1047",
+    "atc_codigo": "B02BX01"
+  },
+  {
+    "id": "4250",
+    "nombre": "Nitrazepam",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Nitrazepam"
+    ],
+    "descripcion": null,
+    "atc_id": "5394",
+    "atc_codigo": "N05CD02"
+  },
+  {
+    "id": "4251",
+    "nombre": "Tribenosido",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Tribenosido"
+    ],
+    "descripcion": null,
+    "atc_id": "1741",
+    "atc_codigo": "C05AX05"
+  },
+  {
+    "id": "4252",
+    "nombre": "Acemetacina",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Acemetacina"
+    ],
+    "descripcion": null,
+    "atc_id": "4586",
+    "atc_codigo": "M01AB11"
+  },
+  {
+    "id": "4253",
+    "nombre": "Acido borico",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Acido borico"
+    ],
+    "descripcion": null,
+    "atc_id": "6630",
+    "atc_codigo": "S02AA03"
+  },
+  {
+    "id": "4254",
+    "nombre": "Didanosina",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Didanosina"
+    ],
+    "descripcion": null,
+    "atc_id": "3578",
+    "atc_codigo": "J05AF02"
+  },
+  {
+    "id": "4255",
+    "nombre": "Doripenem",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Doripenem"
+    ],
+    "descripcion": null,
+    "atc_id": "7346",
+    "atc_codigo": "J01DH04"
+  },
+  {
+    "id": "4256",
+    "nombre": "Ergometrina",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Ergometrina"
+    ],
+    "descripcion": null,
+    "atc_id": "2765",
+    "atc_codigo": "G02AB03"
+  },
+  {
+    "id": "4257",
+    "nombre": "Fenindiona",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Fenindiona"
+    ],
+    "descripcion": null,
+    "atc_id": "909",
+    "atc_codigo": "B01AA02"
+  },
+  {
+    "id": "4258",
+    "nombre": "Fosfestrol",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Fosfestrol"
+    ],
+    "descripcion": null,
+    "atc_id": "4309",
+    "atc_codigo": "L02AA04"
+  },
+  {
+    "id": "4259",
+    "nombre": "Halotano",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Halotano"
+    ],
+    "descripcion": null,
+    "atc_id": "4880",
+    "atc_codigo": "N01AB01"
+  },
+  {
+    "id": "4260",
+    "nombre": "Hidrotalcita",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Hidrotalcita"
+    ],
+    "descripcion": null,
+    "atc_id": "100",
+    "atc_codigo": "A02AD04"
+  },
+  {
+    "id": "4261",
+    "nombre": "Lepirudina",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Lepirudina"
+    ],
+    "descripcion": null,
+    "atc_id": "977",
+    "atc_codigo": "B01AE02"
+  },
+  {
+    "id": "4262",
+    "nombre": "Loteprednol",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Loteprednol"
+    ],
+    "descripcion": null,
+    "atc_id": "6403",
+    "atc_codigo": "S01BA14"
+  },
+  {
+    "id": "4263",
+    "nombre": "Nelfinavir",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Nelfinavir"
+    ],
+    "descripcion": null,
+    "atc_id": "3567",
+    "atc_codigo": "J05AE04"
+  },
+  {
+    "id": "4264",
+    "nombre": "Pranlukast",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Pranlukast"
+    ],
+    "descripcion": null,
+    "atc_id": "6077",
+    "atc_codigo": "R03DC02"
+  },
+  {
+    "id": "4265",
+    "nombre": "Rofecoxib",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Rofecoxib"
+    ],
+    "descripcion": null,
+    "atc_id": "4637",
+    "atc_codigo": "M01AH02"
+  },
+  {
+    "id": "4266",
+    "nombre": "Rosiglitazona",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Rosiglitazona"
+    ],
+    "descripcion": null,
+    "atc_id": "648",
+    "atc_codigo": "A10BG02"
+  },
+  {
+    "id": "4267",
+    "nombre": "Succinilsulfatiazol",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Succinilsulfatiazol"
+    ],
+    "descripcion": null,
+    "atc_id": "454",
+    "atc_codigo": "A07AB04"
+  },
+  {
+    "id": "4268",
+    "nombre": "Desonida",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Desonida"
+    ],
+    "descripcion": null,
+    "atc_id": "2392",
+    "atc_codigo": "D07AB08"
+  },
+  {
+    "id": "4269",
+    "nombre": "Oxacilina",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Oxacilina"
+    ],
+    "descripcion": null,
+    "atc_id": "3239",
+    "atc_codigo": "J01CF04"
+  },
+  {
+    "id": "4270",
+    "nombre": "Oxolamina",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Oxolamina citrato"
+    ],
+    "descripcion": null,
+    "atc_id": "6151",
+    "atc_codigo": "R05DB07"
+  },
+  {
+    "id": "4271",
+    "nombre": "Sibutramina",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Sibutramina"
+    ],
+    "descripcion": null,
+    "atc_id": "531",
+    "atc_codigo": "A08AA10"
+  },
+  {
+    "id": "4272",
+    "nombre": "Cefalotina",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Cefalotina"
+    ],
+    "descripcion": null,
+    "atc_id": "3256",
+    "atc_codigo": "J01DB03"
+  },
+  {
+    "id": "4273",
+    "nombre": "Dicloxacilina",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Dicloxacilina"
+    ],
+    "descripcion": null,
+    "atc_id": "3236",
+    "atc_codigo": "J01CF01"
+  },
+  {
+    "id": "4274",
+    "nombre": "Isoconazol",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Isoconazol"
+    ],
+    "descripcion": null,
+    "atc_id": "2151",
+    "atc_codigo": "D01AC05"
+  },
+  {
+    "id": "4275",
+    "nombre": "Kanamicina",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Kanamicina"
+    ],
+    "descripcion": null,
+    "atc_id": "442",
+    "atc_codigo": "A07AA08"
+  },
+  {
+    "id": "4276",
+    "nombre": "Aminofilina",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Aminofilina"
+    ],
+    "descripcion": null,
+    "atc_id": "6053",
+    "atc_codigo": "R03DA05"
+  },
+  {
+    "id": "4277",
+    "nombre": "Cimetidina",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Cimetidina"
+    ],
+    "descripcion": null,
+    "atc_id": "115",
+    "atc_codigo": "A02BA01"
+  },
+  {
+    "id": "4278",
+    "nombre": "Betacaroteno",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Betacaroteno"
+    ],
+    "descripcion": null,
+    "atc_id": "696",
+    "atc_codigo": "A11CA02"
+  },
+  {
+    "id": "4279",
+    "nombre": "Carbacol",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Carbacol"
+    ],
+    "descripcion": null,
+    "atc_id": "5610",
+    "atc_codigo": "N07AB01"
+  },
+  {
+    "id": "4280",
+    "nombre": "Dactinomicina",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Dactinomicina"
+    ],
+    "descripcion": null,
+    "atc_id": "3938",
+    "atc_codigo": "L01DA01"
+  },
+  {
+    "id": "4281",
+    "nombre": "Feniramina",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Feniramina"
+    ],
+    "descripcion": null,
+    "atc_id": "6203",
+    "atc_codigo": "R06AB05"
+  },
+  {
+    "id": "4282",
+    "nombre": "Hexamidina",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Hexamidina"
+    ],
+    "descripcion": null,
+    "atc_id": "2498",
+    "atc_codigo": "D08AC04"
+  },
+  {
+    "id": "4283",
+    "nombre": "Sulfacetamida",
+    "nombre_generico_en": null,
+    "sinonimos": [
+      "Sulfacetamida"
+    ],
+    "descripcion": null,
+    "atc_id": "6342",
+    "atc_codigo": "S01AB04"
   }
 ]
