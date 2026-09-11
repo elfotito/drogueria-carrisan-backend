@@ -58,7 +58,6 @@ export const FORMAS_ABREV = {
   par: 'parche',
   parch: 'parche',
   mata: 'matafrasco',
-  ped: 'pediatrica',
   oral: 'oral',
   dent: 'dental',
   barra: 'barra',
@@ -70,6 +69,9 @@ export const FORMAS_ABREV = {
   tabl: 'tabletas',
   grag: 'grajeas',
   sup0: 'supositorios',
+  sup: 'supositorios',
+  granu: 'granulados',
+  grano: 'granulados',
 };
 
 // Tokens de ruido (abreviaturas de marca, sufijos, presentación) que no son
@@ -92,9 +94,9 @@ export const FORMAS_EQUIV = {
   'tablets': ['tabletas', 'comprimidos', 'tablets', 'grageas', 'tableta', 'comprimido'],
   'capsulas': ['capsulas', 'capsula', 'tabletas'],
   'jarabe': ['jarabe', 'suspension', 'suspension oral', 'suspension'],
-  'suspension': ['suspension', 'suspension oral', 'polvo para suspension', 'polvo para suspension oral', 'jarabe'],
+  'suspension': ['suspension', 'suspension oral', 'jarabe'],
   'polvo': ['polvo', 'polvo para reconstitucion', 'polvo para suspension', 'polvo para reconstituir'],
-  'suspension oral': ['suspension oral', 'suspension', 'polvo para suspension oral', 'polvo para suspension', 'jarabe'],
+  'suspension oral': ['suspension oral', 'suspension', 'jarabe'],
   'gotas': ['gotas', 'solucion oftalmica', 'solucion'],
   'crema': ['crema', 'unguento', 'pomada', 'locion'],
   'unguento': ['crema', 'unguento', 'pomada', 'locion'],
@@ -121,7 +123,8 @@ export const FORMAS_EQUIV = {
   'jeringa prellenada': ['jeringa prellenada', 'inyectable', 'solucion inyectable'],
   'tintura': ['tintura', 'solucion', 'solucion topica'],
   'pastilla': ['pastilla', 'tabletas', 'comprimidos'],
-  'granulados': ['granulados', 'polvo', 'sobre'],
+  'granulados': ['granulados', 'sobre', 'polvo', 'polvo para reconstitucion', 'solucion oral'],
+  'sobre': ['sobre', 'granulados', 'polvo', 'polvo para reconstitucion', 'polvo para suspension', 'polvo para suspension oral'],
   'parche': ['parche', 'crema', 'unguento'],
   'anillo vaginal': ['anillo vaginal', 'ovulos', 'supositorios'],
   'recubierta': ['tabletas', 'comprimidos', 'tableta', 'comprimido', 'recubierta', 'recubiertas'],
@@ -338,15 +341,31 @@ export function detectarConcDecimal(desc) {
 // La segunda unidad debe ser de dosis sólida (mg/g/ug/mcg/iu/ui): "250MG/5ML"
 // (concentración en volumen de suspensión) NO es una combinación de principios.
 export function detectarConcCombo(desc) {
-  const m = String(desc || '').match(
+  const s = String(desc || '');
+  const m = s.match(
     /(\d+(?:[.,]\d+)?)\s*(?:mg|g|ug|mcg|iu|ui)?\s*[/-]\s*(\d+(?:[.,]\d+)?)\s*(mg|g|ug|mcg|iu|ui)/i
   );
-  if (!m) return null;
-  return {
-    a: m[1].replace(',', '.'),
-    b: m[2].replace(',', '.'),
-    unidad: m[3].toLowerCase(),
-  };
+  if (m) {
+    return {
+      a: m[1].replace(',', '.'),
+      b: m[2].replace(',', '.'),
+      unidad: m[3].toLowerCase(),
+    };
+  }
+  // Par de dosis sin unidades (ej. "650/4 NOCHX"): el siguiente token NO puede
+  // ser unidad de volumen/porcentaje ni otro número (eso sería "500MG/2ML" o
+  // una tripleta "650/2/30MG" que ya captura la primera rama).
+  const m2 = s.match(
+    /(\d+(?:[.,]\d+)?)\s*[/-]\s*(\d+(?:[.,]\d+)?)(?!\s*(?:mg|g|ug|mcg|iu|ui|ml|cm|mm|un|gr|hr|lt|cc|%|[/-]))(?![0-9])/i
+  );
+  if (m2) {
+    return {
+      a: m2[1].replace(',', '.'),
+      b: m2[2].replace(',', '.'),
+      unidad: 'mg',
+    };
+  }
+  return null;
 }
 
 // Parse de la descripción COBECA en tokens
@@ -627,6 +646,7 @@ export function esComboCobeca(parsed, descRaw) {
   const low = String(descRaw || '').toLowerCase();
   if (/(?:^|[^a-z])hct(?:[^a-z]|$)/.test(low)) return true;
   if (/(\d+(?:[.,]\d+)?)\s*(?:mg|g|ug|mcg|iu|ui)\s*[-/]\s*(\d+(?:[.,]\d+)?)\s*(?:mg|g|ug|mcg|iu|ui|%)?/.test(low)) return true;
+  if (detectarConcCombo(low)) return true;
   return false;
 }
 
@@ -640,15 +660,19 @@ export function esComboProducto(productoDb) {
   if (/(?:^|[^a-z])pe(?:[^a-z]|$)/.test(low)) return true;
   const norm = normalizar(nom);
   if (/\bh\b/.test(norm)) return true;
-  if (/\s-\s/.test(normalizar(productoDb.molecula || ''))) return true;
+  // Molécula compuesta ("ACETAMINOFEN - CAFEINA - CLORFENIRAMINA"): normalizar
+  // destruye el guion, así que se detecta sobre la molécula original.
+  if (/\s-\s/.test(productoDb.molecula || '')) return true;
   return false;
 }
 
 // Score de matching entre descripción COBECA (ya parseada) y un producto DB
 // Combina: nombre comercial (peso alto), molécula (peso medio) y forma (peso medio),
 // concentración (peso bajo) y pack size (desempate). Devuelve 0..1.
-export function matchScore(descCobeca, productoDb) {
+export function matchScore(descCobeca, productoDb, __debug) {
   const parsed = typeof descCobeca === 'string' ? parsearDescripcion(descCobeca) : descCobeca;
+  const D = __debug ? {} : null;
+  const ret = (fn) => (D ? { ...D, fin: fn() } : fn());
   const molTokens = parsed.molTokens.map(expandirAbreviatura);
 
   // Obtener la descripción cruda para extraer pack
@@ -667,7 +691,10 @@ export function matchScore(descCobeca, productoDb) {
   // y viceversa (un foto de mono NUNCA debe caer en HCT).
   const comboCobeca = esComboCobeca(parsed, descRaw);
   const comboDb = esComboProducto(productoDb);
-  if (comboCobeca !== comboDb) return -1;
+  if (comboCobeca !== comboDb) {
+    if (D) D.rejectCombo = `comboCobeca=${comboCobeca} comboDb=${comboDb}`;
+    return ret(() => -1);
+  }
 
   // 1) Nombre comercial (marca) — el criterio más fuerte (solo si existe)
   if (productoDb.nombre_comercial) {
@@ -696,8 +723,8 @@ export function matchScore(descCobeca, productoDb) {
     if (n > 0) {
       let molScore = sum / n;
       if (molDb.includes(molTokens.join(' '))) molScore = 1.0;
-      score += molScore * 0.35;
-      parts += 0.35;
+      score += molScore * 0.2;
+      parts += 0.2;
     }
   }
 
@@ -722,12 +749,16 @@ export function matchScore(descCobeca, productoDb) {
     const numCobecaB = parsed.conc2 ? (parsed.conc2.match(/\d+[.,]?\d*/) || [''])[0].replace(',', '.') : null;
     const numCobEval = Number(numCobeca);
     const dosisDb = dosisProductoDb(productoDb);
-    const concMatch = isFinite(numCobEval) && dosisDb.has(numCobEval);
+    // Concentración en volumen (jarabe/gotas, p.ej. "PED 120ML", "GTS 30ML"): es
+    // el tamaño del envase, NO una dosis — no debe marcar discordancia contra las
+    // dosis del producto (ej. TACHIPIRIN FORTE 160mg/5mL frente a "JBE 120ML").
+    const esVolumen = (parsed.conc.match(/(mg|ml|g|ug|mcg|iu|ui|%)/) || [])[1] === 'ml';
+    const concMatch = !esVolumen && isFinite(numCobEval) && dosisDb.has(numCobEval);
 
     // Dosis discordante: la descripción COBECA declara una dosis y el producto DB
     // declara dosis DISTINTAS (p.ej. COBECA "5MG" → producto "2,5 mg"). Rechaza el
     // match para no pegar fotos de presentaciones que no existen en la BD.
-    if (!concMatch && dosisDb.size > 0) {
+    if (!esVolumen && !concMatch && dosisDb.size > 0) {
       dosisDiscordante = true;
     }
     if (concMatch) score += 0.1;
@@ -767,8 +798,16 @@ export function matchScore(descCobeca, productoDb) {
   // Dosis discordante (misma marca, dosis DISTINTA): el candidato es otra
   // presentación, no el producto buscado. Ahoga el score por debajo del umbral.
   if (dosisDiscordante) {
-    return -1;
+    if (D) D.rejectDosis = `dosisDb=[${[...dosisProductoDb(productoDb)].join(',')}] conc=${parsed.conc}`;
+    return ret(() => -1);
   }
 
+  if (D) {
+    D.score = score;
+    D.parts = parts;
+    D.final = parts > 0 ? score / parts : 0;
+    D.parsed = parsed;
+    return D;
+  }
   return parts > 0 ? score / parts : 0;
 }
