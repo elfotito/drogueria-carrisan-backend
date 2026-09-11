@@ -678,6 +678,32 @@ export function esComboProducto(productoDb) {
 // Score de matching entre descripción COBECA (ya parseada) y un producto DB
 // Combina: nombre comercial (peso alto), molécula (peso medio) y forma (peso medio),
 // concentración (peso bajo) y pack size (desempate). Devuelve 0..1.
+// ¿El match cosechable por el nombre comercial (marca) en lugar de la molécula
+// compartida? Un desc sin combinación puede referirse por MARCA a un producto
+// molecularmente combinado (p.ej. "TERAGRIP SUPRA 650MG" → producto combinado
+// TERAGRIPSUPRA). Es seguro relajar el gate de combo solo cuando el solapamiento
+// de moléculas es bajo (el match se ancla en el nombre comercial, no en una dosis
+// compartida): "BISOPROLOL 5MG" → HCT comparte Bisoprolol → NO se relaja.
+function solapamientoMolecula(parsed, productoDb, molTokens) {
+  const molDb = limpiarMoleculaDb(productoDb.molecula || '');
+  const tokensDb = molDb.split(/\s+/).filter(Boolean);
+  if (!tokensDb.length) return 0;
+  let sum = 0;
+  let n = 0;
+  for (const t of molTokens) {
+    if (!t || t.length < 3) continue;
+    if (parsed.labToken && t === parsed.labToken) continue;
+    let best = 0;
+    for (const td of tokensDb) {
+      const sim = tokenSim(t, td);
+      if (sim > best) best = sim;
+    }
+    sum += best;
+    n++;
+  }
+  return n ? sum / n : 0;
+}
+
 export function matchScore(descCobeca, productoDb, __debug) {
   const parsed = typeof descCobeca === 'string' ? parsearDescripcion(descCobeca) : descCobeca;
   const D = __debug ? {} : null;
@@ -697,12 +723,16 @@ export function matchScore(descCobeca, productoDb, __debug) {
 
   // Discriminación mono↔combinación: una descripción COBECA de combinación
   // (HCT, PE, doble dosis) NO debe pegarse a un producto de una sola molécula,
-  // y viceversa (un foto de mono NUNCA debe caer en HCT).
+  // y viceversa (un foto de mono NUNCA debe caer en HCT). Excepción: desc sin
+  // combinación que matchea por MARCA pura a un producto combinado (SUPRA).
   const comboCobeca = esComboCobeca(parsed, descRaw);
   const comboDb = esComboProducto(productoDb);
   if (comboCobeca !== comboDb) {
-    if (D) D.rejectCombo = `comboCobeca=${comboCobeca} comboDb=${comboDb}`;
-    return ret(() => -1);
+    const porMarca = comboCobeca === false && comboDb === true && solapamientoMolecula(parsed, productoDb, molTokens) < 0.5;
+    if (!porMarca) {
+      if (D) D.rejectCombo = `comboCobeca=${comboCobeca} comboDb=${comboDb}`;
+      return ret(() => -1);
+    }
   }
 
   // 1) Nombre comercial (marca) — el criterio más fuerte (solo si existe)
