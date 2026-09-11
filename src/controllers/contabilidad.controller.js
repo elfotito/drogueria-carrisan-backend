@@ -39,11 +39,9 @@ export async function getResumenClientes(req, res) {
           .neq('estado', 'cancelado')
           .neq('estado_pago', 'verificado');
 
-        const deuda_actual = (ordenesDeuda || []).reduce((sum, o) => sum + Number(o.total_usd), 0);
-
         const { data: facturas } = await supabase
           .from('facturas')
-          .select('monto')
+          .select('tipo, monto_facturado, anulada')
           .eq('usuario_id', cliente.id);
 
         const { data: pagos } = await supabase
@@ -51,7 +49,18 @@ export async function getResumenClientes(req, res) {
           .select('monto')
           .eq('usuario_id', cliente.id);
 
-        const total_facturado = (facturas || []).reduce((sum, f) => sum + Number(f.monto), 0);
+        let total_facturado = 0;
+        let notasDebito = 0;
+        let notasCredito = 0;
+        for (const f of facturas || []) {
+          if (f.anulada) continue;
+          if (f.tipo === 'nota_debito') notasDebito += Number(f.monto_facturado || 0);
+          else if (f.tipo === 'nota_credito') notasCredito += Number(f.monto_facturado || 0);
+          else total_facturado += Number(f.monto_facturado || 0);
+        }
+
+        const ordenesDeudaTotal = (ordenesDeuda || []).reduce((sum, o) => sum + Number(o.total_usd), 0);
+        const deuda_actual = ordenesDeudaTotal + notasDebito - notasCredito;
         const total_pagado = (pagos || []).reduce((sum, p) => sum + Number(p.monto), 0);
 
         return {
@@ -365,10 +374,21 @@ export async function getFacturas(req, res) {
   }
 }
 
-// POST /staff/contabilidad/facturas — crear factura, opcionalmente agrupando órdenes.
-// `tipo` puede ser 'factura' (default), 'nota_credito' o 'nota_debito' (requiere la
-// migración 012). `factura_referencia_id` enlaza una nota a la factura que ajusta;
-// `motivo` describe la razón de la nota.
+const TIPOS_DOCUMENTO = ['factura', 'recibo_cobro', 'nota_credito', 'nota_debito'];
+const PREFIJOS = { factura: 'FAC', recibo_cobro: 'RCB', nota_credito: 'NCR', nota_debito: 'NDB' };
+
+function labelTipo(tipo) {
+  if (tipo === 'nota_credito') return 'Nota de crédito';
+  if (tipo === 'nota_debito') return 'Nota de débito';
+  if (tipo === 'recibo_cobro') return 'Recibo de cobro';
+  return 'Factura';
+}
+
+// POST /staff/contabilidad/facturas
+// tipo 'factura'|'recibo_cobro': reflejo de órdenes pagadas. Exige orden_ids;
+// el backend calcula monto_facturado (suma de las órdenes) + monto_bs con la
+// tasa del día (congelada). NO afecta deuda.
+// tipo 'nota_credito'|'nota_debito': monto manual. NC reduce deuda, ND la aumenta.
 export async function createFactura(req, res) {
   const {
     usuario_id,
@@ -376,60 +396,139 @@ export async function createFactura(req, res) {
     monto_facturado,
     nota,
     orden_ids,
-    tipo,
+    tipo = 'factura',
     factura_referencia_id,
     motivo,
   } = req.body;
 
-  if (!usuario_id || !numero_factura || !monto_facturado) {
-    return res.status(400).json({ error: 'usuario_id, numero_factura y monto_facturado son requeridos' });
+  if (!usuario_id || !numero_factura) {
+    return res.status(400).json({ error: 'usuario_id y numero_factura son requeridos' });
+  }
+  if (!TIPOS_DOCUMENTO.includes(tipo)) {
+    return res.status(400).json({ error: `tipo inválido. Usa: ${TIPOS_DOCUMENTO.join(', ')}` });
   }
 
+  const esReflejo = tipo === 'factura' || tipo === 'recibo_cobro';
+  const esNota = tipo === 'nota_credito' || tipo === 'nota_debito';
+
   try {
+    let montoUSD = esReflejo ? 0 : Number(monto_facturado);
+    let montoBs = null;
+    let tasaUsada = null;
+
+    if (esReflejo) {
+      if (!orden_ids || !Array.isArray(orden_ids) || orden_ids.length === 0) {
+        return res.status(400).json({ error: 'La factura o recibo debe incluir al menos una orden' });
+      }
+
+      const { data: ordenes, error: errOrdenes } = await supabase
+        .from('ordenes')
+        .select('id, usuario_id, estado, estado_pago, total_usd')
+        .in('id', orden_ids);
+
+      if (errOrdenes) throw errOrdenes;
+      if (!ordenes || ordenes.length !== orden_ids.length) {
+        return res.status(404).json({ error: 'Una o más órdenes no existen' });
+      }
+
+      for (const o of ordenes) {
+        if (o.usuario_id !== Number(usuario_id)) {
+          return res.status(400).json({ error: `La orden #${o.id} no pertenece a este cliente` });
+        }
+        if (o.estado === 'cancelado' || o.estado_pago !== 'verificado') {
+          return res.status(400).json({ error: `La orden #${o.id} aún no está pagada; solo se facturan órdenes pagadas` });
+        }
+      }
+
+      const { data: yaFacturadas, error: errYaFacturadas } = await supabase
+        .from('factura_ordenes')
+        .select('orden_id')
+        .in('orden_id', orden_ids);
+
+      if (errYaFacturadas) throw errYaFacturadas;
+      if (yaFacturadas && yaFacturadas.length > 0) {
+        return res.status(409).json({ error: 'Una o más órdenes ya están facturadas' });
+      }
+
+      montoUSD = ordenes.reduce((sum, o) => sum + Number(o.total_usd), 0);
+
+      const { data: tasa, error: errTasa } = await supabase
+        .from('tasa_cambio')
+        .select('usd_a_ves')
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (errTasa || !tasa) {
+        return res.status(400).json({ error: 'No hay tasa de cambio configurada' });
+      }
+
+      tasaUsada = Number(tasa.usd_a_ves);
+      montoBs = Math.round(montoUSD * tasaUsada * 100) / 100;
+    } else {
+      if (!monto_facturado || Number(monto_facturado) <= 0) {
+        return res.status(400).json({ error: 'El monto de la nota debe ser mayor a 0' });
+      }
+
+      if (factura_referencia_id) {
+        const refId = Number(factura_referencia_id);
+        const { data: ref, error: errRef } = await supabase
+          .from('facturas')
+          .select('id, usuario_id, anulada')
+          .eq('id', refId)
+          .single();
+
+        if (errRef || !ref) {
+          return res.status(404).json({ error: 'La factura de referencia no existe' });
+        }
+        if (ref.anulada) {
+          return res.status(400).json({ error: 'La factura de referencia está anulada' });
+        }
+        if (ref.usuario_id !== Number(usuario_id)) {
+          return res.status(400).json({ error: 'La factura de referencia no pertenece a este cliente' });
+        }
+      }
+    }
+
     const { data: factura, error: errorFactura } = await supabase
       .from('facturas')
       .insert({
         usuario_id: Number(usuario_id),
         numero_factura,
-        monto_facturado,
+        monto_facturado: montoUSD,
+        monto_bs: montoBs,
+        tasa_usada: tasaUsada,
         nota,
-        created_by: req.staff.id,
-        ...(tipo ? { tipo } : {}),
-        ...(factura_referencia_id ? { factura_referencia_id: Number(factura_referencia_id) } : {}),
-        ...(motivo ? { motivo } : {}),
+        tipo,
+        ...(esNota
+          ? {
+              factura_referencia_id: factura_referencia_id ? Number(factura_referencia_id) : null,
+              motivo,
+            }
+          : {}),
+        created_by_staff: req.staff.id,
       })
       .select()
       .single();
 
     if (errorFactura) throw errorFactura;
 
-    if (orden_ids && orden_ids.length > 0) {
-      const registros = orden_ids.map(orden_id => ({
-        factura_id: factura.id,
-        orden_id
-      }));
-
-      const { error: errorVinculo } = await supabase
-        .from('factura_ordenes')
-        .insert(registros);
+    if (esReflejo && orden_ids.length > 0) {
+      const registros = orden_ids.map((orden_id) => ({ factura_id: factura.id, orden_id }));
+      const { error: errorVinculo } = await supabase.from('factura_ordenes').insert(registros);
 
       if (errorVinculo) {
         await supabase.from('facturas').delete().eq('id', factura.id);
-
-        if (errorVinculo.code === '23505') {
-          return res.status(409).json({ error: 'Una o más órdenes ya están facturadas' });
-        }
         throw errorVinculo;
       }
     }
 
-    const tipoDoc = tipo === 'nota_credito' ? 'Nota de crédito' : tipo === 'nota_debito' ? 'Nota de débito' : 'Factura';
-
+    const nombreDoc = labelTipo(tipo);
     await crearNotificacion(
       Number(usuario_id),
       'factura_emitida',
-      `${tipoDoc} emitida`,
-      `Se emitió ${tipoDoc === 'Factura' ? 'la factura' : 'la nota'} #${numero_factura} por $${monto_facturado}`,
+      `${nombreDoc} emitida`,
+      `Se emitió la ${nombreDoc.toLowerCase()} #${numero_factura} por $${montoUSD.toFixed(2)}`,
       null
     );
 
@@ -509,9 +608,89 @@ export async function deleteFactura(req, res) {
   }
 }
 
+// GET /staff/contabilidad/facturas/siguiente?tipo= — siguiente número correlativo sugerido.
+// Secuencia por prefijo de tipo (FAC-, RCB-, NCR-, NDB-); toma el máx. numérico + 1.
+// El resultado es UNA SUGERENCIA editable en el frontend.
+export async function getSiguienteNumero(req, res) {
+  const tipo = req.query.tipo || 'factura';
+  const prefijo = PREFIJOS[tipo];
+
+  if (!prefijo) {
+    return res.status(400).json({ error: 'tipo inválido' });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('facturas')
+      .select('numero_factura')
+      .ilike('numero_factura', `${prefijo}-%`);
+
+    if (error) throw error;
+
+    let max = 0;
+    for (const f of data || []) {
+      const match = f.numero_factura.match(/(\d+)\s*$/);
+      if (match) max = Math.max(max, Number(match[1]));
+    }
+
+    res.json({ numero: `${prefijo}-${String(max + 1).padStart(4, '0')}` });
+  } catch (err) {
+    console.error('Error al calcular siguiente número (contabilidad):', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
+// PATCH /staff/contabilidad/facturas/:id/anular — soft-delete. El documento
+// queda con anulada=true y visible en "Documentos anulados"; una NC/ND anulada
+// deja de afectar la deuda (getResumenClientes filtra por anulada).
+export async function anularFactura(req, res) {
+  const { id } = req.params;
+  const { motivo } = req.body;
+
+  if (!motivo || typeof motivo !== 'string' || !motivo.trim()) {
+    return res.status(400).json({ error: 'El motivo de la anulación es obligatorio' });
+  }
+
+  try {
+    const { data: factura, error: errorFactura } = await supabase
+      .from('facturas')
+      .select('id, anulada')
+      .eq('id', id)
+      .single();
+
+    if (errorFactura || !factura) {
+      return res.status(404).json({ error: 'Documento no encontrado' });
+    }
+    if (factura.anulada) {
+      return res.status(409).json({ error: 'El documento ya está anulado' });
+    }
+
+    const { data, error } = await supabase
+      .from('facturas')
+      .update({
+        anulada: true,
+        anulada_motivo: motivo.trim(),
+        anulada_por: req.staff.id,
+        anulada_el: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error || !data) throw error;
+
+    res.json(data);
+  } catch (err) {
+    console.error('Error al anular documento (contabilidad):', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
 // GET /staff/contabilidad/clientes/:id/sin-facturar — helper para armar factura nueva.
+// Con ?solo_pagadas=1|true devuelve solo las órdenes facturables (pagadas y no canceladas).
 export async function getOrdenesSinFacturar(req, res) {
   const { id } = req.params;
+  const { solo_pagadas } = req.query;
 
   try {
     const { data: ordenesFacturadas, error: errorFacturadas } = await supabase
@@ -530,6 +709,11 @@ export async function getOrdenesSinFacturar(req, res) {
 
     if (idsFacturados.length > 0) {
       query = query.not('id', 'in', idsFacturados);
+    }
+
+    // Facturación: solo se facturan órdenes pagadas (verificadas) y no canceladas.
+    if (solo_pagadas === '1' || solo_pagadas === 'true') {
+      query = query.eq('estado_pago', 'verificado').neq('estado', 'cancelado');
     }
 
     const { data, error } = await query;

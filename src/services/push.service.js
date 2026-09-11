@@ -34,6 +34,9 @@ const TIPO_A_CATEGORIA = {
   chat_mensaje: 'chat',
   orden_por_vencer: 'credito',
   orden_vencida: 'credito',
+  recordatorio_cobro: 'credito',
+  credito_bloqueado: 'credito',
+  credito_desbloqueado: 'credito',
   oferta: 'ofertas',
 };
 

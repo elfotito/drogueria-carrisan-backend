@@ -9,12 +9,13 @@ import { crearNotificacion } from '../controllers/notificaciones.controller.js';
 // 2) "Vencida" — el día que se pasa fecha_vencimiento, una sola vez
 //    (notificado_vencido). Esta parte es la que ya tenías.
 //
-// No pausa nada acá — el bloqueo real del checkout se calcula en
-// caliente en ordenes.controller.js a partir de si existen órdenes
-// vencidas, así que este job es puramente el aviso al cliente.
+// No pausa nada en caliente (el checkout valida saldo en construirOrden);
+// el job se encarga de los AVISOS al cliente y del AUTO-FREEZE: clientes
+// con deuda vencida > DIAS_BLOQUEO_AUTO se bloquean (credito_bloqueado).
 // ---------------------------------------------------------------
 
 const DIAS_AVISO_PREVIO = 3;
+const DIAS_BLOQUEO_AUTO = 60;
 
 export async function revisarVencimientos() {
   console.log('⏰ Revisando órdenes vencidas…');
@@ -56,6 +57,63 @@ export async function revisarVencimientos() {
 
     if (ordenesPorVencer?.length) {
       console.log(`📬 ${ordenesPorVencer.length} orden(es) por vencer notificada(s).`);
+    }
+
+    // ---------- 3) Auto-freeze: bloquear crédito de clientes con deuda
+    // vencida > DIAS_BLOQUEO_AUTO. Va ANTES del early-return de "ya
+    // vencidas" (ese return aplica cuando no hay vencidas SIN notificar,
+    // y no debe saltarse el bloqueo). ----------
+    const limiteFreeze = new Date(fechaVenezuela.getTime() - DIAS_BLOQUEO_AUTO * 86400000);
+
+    const { data: candidatosFreeze } = await supabase
+      .from('ordenes')
+      .select('usuario_id, total_usd, fecha_vencimiento')
+      .neq('estado', 'cancelado')
+      .neq('estado_pago', 'verificado')
+      .not('fecha_vencimiento', 'is', null)
+      .lt('fecha_vencimiento', limiteFreeze.toISOString());
+
+    if (candidatosFreeze?.length) {
+      // Agrupar por usuario
+      const porUsuario = {};
+      for (const o of candidatosFreeze) {
+        if (!porUsuario[o.usuario_id]) porUsuario[o.usuario_id] = [];
+        porUsuario[o.usuario_id].push(o);
+      }
+
+      for (const [uid, ordenes] of Object.entries(porUsuario)) {
+        const usuario_id = Number(uid);
+
+        // Verificar que no esté ya bloqueado
+        const { data: user } = await supabase
+          .from('users')
+          .select('credito_bloqueado')
+          .eq('id', usuario_id)
+          .single();
+
+        if (user?.credito_bloqueado) continue;
+
+        const totalVencido = ordenes.reduce((s, o) => s + Number(o.total_usd), 0);
+        const motivo = `Automático: ${ordenes.length} orden(es) vencida(s) por $${totalVencido.toFixed(2)} con más de ${DIAS_BLOQUEO_AUTO} días de atraso`;
+
+        await supabase
+          .from('users')
+          .update({
+            credito_bloqueado: true,
+            credito_bloqueado_motivo: motivo,
+          })
+          .eq('id', usuario_id);
+
+        await crearNotificacion(
+          usuario_id,
+          'credito_bloqueado',
+          'Crédito suspendido',
+          `Tu línea de crédito ha sido suspendida automáticamente por deuda vencida. Contacta a la empresa para regularizar tu cuenta.`,
+          null
+        );
+
+        console.log(`🔒 Crédito auto-bloqueado: usuario ${usuario_id} (${motivo})`);
+      }
     }
 
     // ---------- 2) Ya vencidas (tu lógica original, sin cambios) ----------

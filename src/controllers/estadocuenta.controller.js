@@ -12,7 +12,7 @@ export async function getEstadoCuenta(req, res) {
   try {
     const { data: cliente, error: errorCliente } = await supabase
       .from('users')
-      .select('id, nombre, email, linea_credito')
+      .select('id, nombre, email, linea_credito, credito_bloqueado, credito_bloqueado_motivo')
       .eq('id', usuario_id)
       .single();
 
@@ -77,6 +77,8 @@ export async function getEstadoCuenta(req, res) {
         deuda_vencida,
         saldo: Number(cliente.linea_credito || 0) - deuda_actual,
         cantidad_ordenes_vencidas: ordenesVencidas.length,
+        credito_bloqueado: cliente.credito_bloqueado || false,
+        credito_bloqueado_motivo: cliente.credito_bloqueado_motivo || null,
         proxima_orden_vencer: proximaAVencer
           ? { id: proximaAVencer.id, fecha_vencimiento: proximaAVencer.fecha_vencimiento, total_usd: proximaAVencer.total_usd }
           : null,

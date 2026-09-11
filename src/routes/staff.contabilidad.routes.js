@@ -9,7 +9,8 @@ import {
   getFacturas,
   createFactura,
   updateFactura,
-  deleteFactura,
+  getSiguienteNumero,
+  anularFactura,
   getOrdenesSinFacturar,
   getReportesPago,
   verificarReportePago,
@@ -36,9 +37,10 @@ router.delete('/pagos/:id', verifyStaffJWT, checkRolStaff(ROLES_CONTABILIDAD), d
 
 // Facturas
 router.get('/facturas', verifyStaffJWT, checkRolStaff(ROLES_CONTABILIDAD), getFacturas);
+router.get('/facturas/siguiente', verifyStaffJWT, checkRolStaff(ROLES_CONTABILIDAD), getSiguienteNumero);
 router.post('/facturas', verifyStaffJWT, checkRolStaff(ROLES_CONTABILIDAD), createFactura);
+router.patch('/facturas/:id/anular', verifyStaffJWT, checkRolStaff(ROLES_CONTABILIDAD), anularFactura);
 router.patch('/facturas/:id', verifyStaffJWT, checkRolStaff(ROLES_CONTABILIDAD), updateFactura);
-router.delete('/facturas/:id', verifyStaffJWT, checkRolStaff(ROLES_CONTABILIDAD), deleteFactura);
 
 // Reportes de pago (cola de verificación)
 router.get('/reportes-pago', verifyStaffJWT, checkRolStaff(ROLES_CONTABILIDAD), getReportesPago);

@@ -208,11 +208,16 @@ export async function construirOrden(usuario_id, datos, opciones = {}) {
   if (formaPagoSolicitada === 'credito') {
     const { data: cliente, error: errorCliente } = await supabase
       .from('users')
-      .select('linea_credito')
+      .select('linea_credito, credito_bloqueado')
       .eq('id', usuario_id)
       .single();
 
     if (errorCliente || !cliente) throw errorCliente || new ErrorOrden(404, 'Usuario no encontrado');
+
+    // Bloqueo de crédito: si el cliente tiene credito_bloqueado, rechazar.
+    if (cliente.credito_bloqueado) {
+      throw new ErrorOrden(403, 'Crédito suspendido. Contacte a la empresa para regularizar su cuenta.');
+    }
 
     const { data: facturas, error: errorFacturas } = await supabase
       .from('facturas')
