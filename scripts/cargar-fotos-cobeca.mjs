@@ -21,6 +21,16 @@ const DB_CONFIG = {
 const UMBRAL = 0.6;
 const CHUNK = 200;
 
+// Asignaciones aprobadas por el dueño (2026-09-11) que no alcanzan el umbral:
+// - 39378 TACHIPIRIN GTS 100mg/mL: único candidato, concentración coincide (0.581).
+// - 39391 TERAGRIPSUPRA X10: única SUPRA en BD, match por marca pura; gate de
+//   combo ya relajado por marca en cobecaParser, score residual 0.48.
+// La foto se toma del `desc` exacto en data/fotos.json.
+const FORZADOS = [
+  { desc: 'TACHIPIRIN GTS PED 30ML ELM', productoId: 39378, score: 0.581 },
+  { desc: 'TERAGRIP SUPRA TAB REC 650MG X10 FAR', productoId: 39391, score: 0.48 },
+];
+
 async function main() {
   const raw = fs.readFileSync(new URL('../data/fotos.json', import.meta.url), 'utf-8');
   const fotos = JSON.parse(raw);
@@ -82,6 +92,20 @@ async function main() {
     } else {
       sinMatch++;
     }
+  }
+
+  // Asignaciones forzadas aprobadas por el dueño (bajo umbral pero unívocas).
+  // Se resuelven por `desc` exacto contra fotos.json; siguen pasando por el
+  // dedupe por producto, así que nunca pisan una foto legítima de mayor score.
+  const imgPorDesc = new Map(conImagen.map((f) => [f.desc_articulo, f.imagen]));
+  for (const fz of FORZADOS) {
+    const img = imgPorDesc.get(fz.desc);
+    if (!img) { console.warn(`FORZADO sin imagen en fotos.json (revisar desc): ${fz.desc}`); continue; }
+    const existe = productos.some((p) => p.id === fz.productoId);
+    if (!existe) { console.warn(`FORZADO producto ${fz.productoId} no existe en BD`); continue; }
+    updates.push({ productoId: fz.productoId, fotoUrl: img, score: fz.score, desc: fz.desc });
+    matched++;
+    console.log(`  FORZADO ${fz.productoId} <- ${fz.desc}`);
   }
 
   console.log(`\nResultados del matching:`);

@@ -512,6 +512,32 @@ export function scoreNombreComercial(parseado, nombreComercialDb) {
     let mejor = 0;
     for (const td of tokensDb) {
       if (td === tc) { mejor = 1; break; }
+      // MARCA COMPUESTA PEGADA: un token DB es la concatenación de tc con otro
+      // token de la MISMA desc (TERAGRIPFORTE = TERAGRIP + FORTE). Sin esto,
+      // TERAGRIP pierde sus descs frente a marcas rivales de igual composición
+      // (ANGRIP FORTE gana "TERAGRIP ... NOCHX4" porque tiene "forte" suelto).
+      if (tc.length >= 4 && td.length > tc.length) {
+        if (td.startsWith(tc)) {
+          const resto = td.slice(tc.length);
+          if (
+            resto.length >= 3 &&
+            tokensCobeca.some((o) => o && o !== tc && o.length >= 3 && resto === o)
+          ) {
+            mejor = 1;
+            break;
+          }
+        }
+        if (td.endsWith(tc)) {
+          const resto = td.slice(0, td.length - tc.length);
+          if (
+            resto.length >= 3 &&
+            tokensCobeca.some((o) => o && o !== tc && o.length >= 3 && resto === o)
+          ) {
+            mejor = 1;
+            break;
+          }
+        }
+      }
       const sim = tokenSim(tc, td);
       if (sim > mejor) mejor = sim;
     }
@@ -678,32 +704,6 @@ export function esComboProducto(productoDb) {
 // Score de matching entre descripción COBECA (ya parseada) y un producto DB
 // Combina: nombre comercial (peso alto), molécula (peso medio) y forma (peso medio),
 // concentración (peso bajo) y pack size (desempate). Devuelve 0..1.
-// ¿El match cosechable por el nombre comercial (marca) en lugar de la molécula
-// compartida? Un desc sin combinación puede referirse por MARCA a un producto
-// molecularmente combinado (p.ej. "TERAGRIP SUPRA 650MG" → producto combinado
-// TERAGRIPSUPRA). Es seguro relajar el gate de combo solo cuando el solapamiento
-// de moléculas es bajo (el match se ancla en el nombre comercial, no en una dosis
-// compartida): "BISOPROLOL 5MG" → HCT comparte Bisoprolol → NO se relaja.
-function solapamientoMolecula(parsed, productoDb, molTokens) {
-  const molDb = limpiarMoleculaDb(productoDb.molecula || '');
-  const tokensDb = molDb.split(/\s+/).filter(Boolean);
-  if (!tokensDb.length) return 0;
-  let sum = 0;
-  let n = 0;
-  for (const t of molTokens) {
-    if (!t || t.length < 3) continue;
-    if (parsed.labToken && t === parsed.labToken) continue;
-    let best = 0;
-    for (const td of tokensDb) {
-      const sim = tokenSim(t, td);
-      if (sim > best) best = sim;
-    }
-    sum += best;
-    n++;
-  }
-  return n ? sum / n : 0;
-}
-
 export function matchScore(descCobeca, productoDb, __debug) {
   const parsed = typeof descCobeca === 'string' ? parsearDescripcion(descCobeca) : descCobeca;
   const D = __debug ? {} : null;
@@ -723,16 +723,16 @@ export function matchScore(descCobeca, productoDb, __debug) {
 
   // Discriminación mono↔combinación: una descripción COBECA de combinación
   // (HCT, PE, doble dosis) NO debe pegarse a un producto de una sola molécula,
-  // y viceversa (un foto de mono NUNCA debe caer en HCT). Excepción: desc sin
-  // combinación que matchea por MARCA pura a un producto combinado (SUPRA).
+  // y viceversa (un foto de mono NUNCA debe caer en HCT). Se mantiene estricto:
+  // los casos "mono con marca compuesta" (TERAGRIPSUPRA) se resuelven vía la
+  // lista FORZADOS del loader (aprobados por el dueño), no relajando aquí —
+  // una relajación por "marca" admitió falsos (ANTAAR mono→ANTAAR HCT,
+  // BISOPROLOL→BISOPROLOL/HCT, ANGRIP foto→MEDIGRIP).
   const comboCobeca = esComboCobeca(parsed, descRaw);
   const comboDb = esComboProducto(productoDb);
   if (comboCobeca !== comboDb) {
-    const porMarca = comboCobeca === false && comboDb === true && solapamientoMolecula(parsed, productoDb, molTokens) < 0.5;
-    if (!porMarca) {
-      if (D) D.rejectCombo = `comboCobeca=${comboCobeca} comboDb=${comboDb}`;
-      return ret(() => -1);
-    }
+    if (D) D.rejectCombo = `comboCobeca=${comboCobeca} comboDb=${comboDb}`;
+    return ret(() => -1);
   }
 
   // 1) Nombre comercial (marca) — el criterio más fuerte (solo si existe)
