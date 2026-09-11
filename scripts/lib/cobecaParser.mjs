@@ -429,11 +429,12 @@ export function parsearDescripcion(desc) {
 
   // Detección de laboratorio: el token solo es laboratorio si está en el mapa de
   // abreviaturas conocidas o parece una marca de la casa (token corto y no-palabra).
+  const NO_LAB_VARIANTS = new Set(['dia', 'noche', 'noch', 'nochx4', 'supra']);
   labToken = null;
   if (molTokens.length > 1) {
     const ultimo = molTokens[molTokens.length - 1];
     const enLab = LAB_ABREV[ultimo];
-    const pareceMarca = ultimo.length >= 2 && ultimo.length <= 4 && !STOPWORDS.has(ultimo);
+    const pareceMarca = ultimo.length >= 2 && ultimo.length <= 4 && !STOPWORDS.has(ultimo) && !NO_LAB_VARIANTS.has(ultimo);
     if (enLab || pareceMarca) {
       labToken = ultimo;
     }
@@ -581,14 +582,18 @@ export function construirIndice(productos) {
 
 export function candidatosPara(parsed, idx) {
   const set = new Map();
+  const keys = [...idx.keys()];
   for (const tok of parsed.molTokens) {
     const clave = expandirAbreviatura(tok);
     if (clave.length < 3) continue;
-    for (const p of idx.get(clave) || []) {
+    const exactos = idx.get(clave);
+    const lista = exactos
+      ? exactos
+      : keys.filter((k) => clave.includes(k) || k.includes(clave)).flatMap((k) => idx.get(k));
+    for (const p of lista) {
       set.set(p.id, { p, coincidencias: (set.get(p.id)?.coincidencias || 0) + 1 });
     }
   }
-  // Ordenar por coincidencias desc para evaluar primero los más probables
   return [...set.values()].sort((a, b) => b.coincidencias - a.coincidencias).map((e) => e.p);
 }
 
@@ -641,11 +646,15 @@ export function dosisProductoDb(productoDb) {
 // ¿La descripción COBECA es una combinación (HCT/doble dosis)? p.ej.
 // "ANTAAR/HCT TAB 5MG/6,25MG", "BIOTALOL HCT". NO se usa la letra suelta
 // ("ANG/H", "L.O"): la mayoría son ruido de laboratorio, no combinaciones.
+// "160MG/5ML" (concentración en volumen) tampoco es una combinación.
+function reDobleDosis() {
+  return /(\d+(?:[.,]\d+)?)\s*(?:mg|g|ug|mcg|iu|ui)\s*[-/]\s*(\d+(?:[.,]\d+)?)\s*(?!\s*(?:ml|%))\s*(?:mg|g|ug|mcg|iu|ui)?/i;
+}
 export function esComboCobeca(parsed, descRaw) {
   if (parsed.combo) return true;
   const low = String(descRaw || '').toLowerCase();
   if (/(?:^|[^a-z])hct(?:[^a-z]|$)/.test(low)) return true;
-  if (/(\d+(?:[.,]\d+)?)\s*(?:mg|g|ug|mcg|iu|ui)\s*[-/]\s*(\d+(?:[.,]\d+)?)\s*(?:mg|g|ug|mcg|iu|ui|%)?/.test(low)) return true;
+  if (reDobleDosis().test(low)) return true;
   if (detectarConcCombo(low)) return true;
   return false;
 }
@@ -655,7 +664,7 @@ export function esComboCobeca(parsed, descRaw) {
 export function esComboProducto(productoDb) {
   const nom = `${productoDb.nombre_comercial || ''} ${productoDb.molecula || ''}`;
   const low = nom.toLowerCase();
-  if (/(\d+(?:[.,]\d+)?)\s*(?:mg|g|ug|mcg|iu|ui)\s*[-/]\s*(\d+(?:[.,]\d+)?)\s*(?:mg|g|ug|mcg|iu|ui|%)?/.test(low)) return true;
+  if (reDobleDosis().test(low)) return true;
   if (/(?:^|[^a-z])hct(?:[^a-z]|$)/.test(low)) return true;
   if (/(?:^|[^a-z])pe(?:[^a-z]|$)/.test(low)) return true;
   const norm = normalizar(nom);
@@ -767,7 +776,7 @@ export function matchScore(descCobeca, productoDb, __debug) {
     if (numCobecaB && dosisDb.has(Number(numCobecaB))) {
       score += 0.05;
     }
-    parts += 0.1;
+    if (!esVolumen) parts += 0.1;
   }
 
   // 5) Laboratorio (peso bajo — a veces el lab no concuerda porque COBECA usa marcas)
@@ -807,6 +816,7 @@ export function matchScore(descCobeca, productoDb, __debug) {
     D.parts = parts;
     D.final = parts > 0 ? score / parts : 0;
     D.parsed = parsed;
+    D.nomScore = productoDb.nombre_comercial ? scoreNombreComercial(parsed, productoDb.nombre_comercial) : 0;
     return D;
   }
   return parts > 0 ? score / parts : 0;

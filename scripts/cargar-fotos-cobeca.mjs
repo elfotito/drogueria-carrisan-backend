@@ -56,7 +56,7 @@ async function main() {
 
   for (const foto of conImagen) {
     const parsed = parsearDescripcion(foto.desc_articulo);
-    parsed._raw = foto.desc_articulo; // para que matchScore extraiga pack
+    parsed._raw = foto.desc_articulo;
     if (!parsed.forma) { noFarmaco++; sinMatch++; continue; }
 
     const candidatos = candidatosPara(parsed, idx);
@@ -69,7 +69,6 @@ async function main() {
     }
 
     if (best) {
-      // Preferir candidatos con ancla, pero SOLO si mejoran el score actual
       for (const p of candidatos) {
         if (!tieneAncla(parsed, p)) continue;
         const sp = matchScore(parsed, p);
