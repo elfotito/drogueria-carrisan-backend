@@ -29,6 +29,13 @@ const CHUNK = 200;
 const FORZADOS = [
   { desc: 'TACHIPIRIN GTS PED 30ML ELM', productoId: 39378, score: 0.581 },
   { desc: 'TERAGRIP SUPRA TAB REC 650MG X10 FAR', productoId: 39391, score: 0.48 },
+  // FERGANIC FOLIC (2026-09-11): el gate de combo bloquea el natural porque el
+  // producto lleva dosis dual ("40 mg - 350 mcg") y el desc COBECA no trae
+  // molécula ("FERGANIC FOLIC"). El dueño solo toma el jarabe de esta línea;
+  // tabletas quedan para referencia. Unívoco por marca + presentación.
+  { desc: 'FERGANIC FOLIC TAB MAST 40MG X30 MEG', productoId: 39218, score: 0.85 },
+  { desc: 'FERGANIC FOLIC TAB MAST 40MG X20 MEG', productoId: 39219, score: 0.85 },
+  { desc: 'FERGANIC FOLIC JBE 40MG/360 120ML MEG', productoId: 38080, score: 0.785 },
 ];
 
 async function main() {
