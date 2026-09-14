@@ -8,6 +8,7 @@ import {
   crearBridgeAdmin,
   getDireccionesDeCliente,
   getPresupuestosDeCliente,
+  listarPresupuestos,
   crearPresupuestoParaCliente,
   getPresupuestoStaff,
   recotizarPresupuestoStaff,
@@ -20,6 +21,7 @@ import {
   getCotizacionesDeCliente,
   getRequerimientosDeCliente,
 } from '../controllers/staff.clientes.controller.js';
+import { listarProductosStaff } from '../controllers/staff.productos.controller.js';
 import { verifyStaffJWT, checkRolStaff } from '../middleware/staffAuth.js';
 
 const router = Router();
@@ -33,6 +35,7 @@ router.post('/login', loginStaff);
 router.get('/despacho', verifyStaffJWT, checkRolStaff(ROLES_DESPACHO), getColaDespacho);
 router.patch('/despacho/:id/entregar', verifyStaffJWT, checkRolStaff(ROLES_DESPACHO), marcarEntregado);
 router.get('/clientes', verifyStaffJWT, checkRolStaff(ROLES_VENTAS), listarClientes);
+router.get('/productos', verifyStaffJWT, checkRolStaff(ROLES_VENTAS), listarProductosStaff);
 router.get('/clientes/:id/detalle', verifyStaffJWT, checkRolStaff(ROLES_VENTAS), getClienteDetalle);
 router.get('/clientes/:id/ordenes', verifyStaffJWT, checkRolStaff(ROLES_VENTAS), getOrdenesDeCliente);
 router.get('/clientes/:id/cotizaciones', verifyStaffJWT, checkRolStaff(ROLES_VENTAS), getCotizacionesDeCliente);
@@ -41,6 +44,7 @@ router.get('/clientes/:id/direcciones', verifyStaffJWT, checkRolStaff(ROLES_VENT
 router.get('/clientes/:id/presupuestos', verifyStaffJWT, checkRolStaff(ROLES_VENTAS), getPresupuestosDeCliente);
 router.post('/ordenes', verifyStaffJWT, checkRolStaff(ROLES_VENTAS), crearOrdenParaCliente);
 router.post('/presupuestos', verifyStaffJWT, checkRolStaff(ROLES_VENTAS), crearPresupuestoParaCliente);
+router.get('/presupuestos', verifyStaffJWT, checkRolStaff(ROLES_VENTAS), listarPresupuestos);
 router.get('/presupuestos/:id', verifyStaffJWT, checkRolStaff(ROLES_VENTAS), getPresupuestoStaff);
 router.post('/presupuestos/:id/recotizar', verifyStaffJWT, checkRolStaff(ROLES_VENTAS), recotizarPresupuestoStaff);
 router.post('/presupuestos/:id/generar-pedido', verifyStaffJWT, checkRolStaff(ROLES_VENTAS), generarPedidoDesdePresupuesto);
