@@ -15,10 +15,6 @@ import { supabase } from '../config/supabase.js';
 const POR_PAGINA_DEFAULT = 20;
 const POR_PAGINA_MAX = 50;
 
-function paginar(offset, porPagina) {
-  return { from: offset, to: offset + porPagina - 1 };
-}
-
 // Lógica de deuda replicada de credito.controller.js L31-46
 // Supabase .neq() es NULL-safe (PostgREST incluye NULL).
 async function calcularDeudasPorUsuarioIds(ids) {
