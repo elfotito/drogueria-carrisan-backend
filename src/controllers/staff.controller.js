@@ -311,6 +311,49 @@ export async function getPresupuestosDeCliente(req, res) {
   }
 }
 
+// GET /staff/presupuestos?estado=&usuario_id=&pagina=&por_pagina=
+// Listado GLOBAL de presupuestos (staff): pagina con count exacto y
+// nombre/email del cliente unido en batch a users. Al no confiar en que
+// exista FK embebible de presupuestos->users, el join se hace en 2 queries.
+export async function listarPresupuestos(req, res) {
+  const { estado, usuario_id } = req.query;
+  const pagina = Math.max(1, parseInt(req.query.pagina, 10) || 1);
+  const porPagina = Math.min(Math.max(parseInt(req.query.por_pagina, 10) || 20, 1), 50);
+  const offset = (pagina - 1) * porPagina;
+
+  try {
+    let query = supabase
+      .from('presupuestos')
+      .select('id, numero, estado, usuario_id, fecha_creacion, fecha_expiracion, total_usd, creado_por_staff_id, orden_generada_id', { count: 'exact' });
+
+    if (estado) query = query.eq('estado', estado);
+    if (usuario_id) query = query.eq('usuario_id', usuario_id);
+
+    query = query.order('fecha_creacion', { ascending: false }).range(offset, offset + porPagina - 1);
+
+    const { data, count, error } = await query;
+    if (error) throw error;
+
+    const ids = [...new Set((data || []).map((p) => p.usuario_id).filter(Boolean))];
+    const usuarios = {};
+    if (ids.length) {
+      const { data: filas } = await supabase.from('users').select('id, nombre, email').in('id', ids);
+      for (const u of filas || []) usuarios[u.id] = u;
+    }
+
+    const presupuestos = (data || []).map((p) => ({
+      ...p,
+      usuario: usuarios[p.usuario_id] || null,
+    }));
+
+    const totalPaginas = Math.max(1, Math.ceil((count || 0) / porPagina));
+    res.json({ presupuestos, total: count || 0, pagina, por_pagina: porPagina, total_paginas: totalPaginas });
+  } catch (err) {
+    console.error('Error al listar presupuestos:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
 // POST /staff/presupuestos — un vendedor crea un presupuesto a nombre de
 // un cliente ya registrado. Reutiliza construirPresupuesto (misma
 // resolucion de precios/disponibilidad que el self-service del cliente)
