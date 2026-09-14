@@ -225,6 +225,9 @@ export async function marcarEnviado(req, res) {
     if (error || !orden) {
       return res.status(404).json({ error: 'Orden no encontrada' });
     }
+    if (!orden.paquete_verificado) {
+      return res.status(400).json({ error: 'El paquete no ha sido verificado. Confirma el paquete antes de marcar como enviado.' });
+    }
     if (!validarTransicion(orden.estado, 'enviado', {
       tipo_envio: orden.tipo_envio,
       forma_pago: orden.forma_pago,

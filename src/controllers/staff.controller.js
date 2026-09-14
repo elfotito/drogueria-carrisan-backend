@@ -253,9 +253,27 @@ export async function crearOrdenParaCliente(req, res) {
       return res.status(403).json({ error: 'El cliente está desactivado' });
     }
 
+    const bodyEnvio = {
+      items, forma_pago, tipo_envio,
+      direccion_envio_id, agencia_envio,
+      agencia_envio_id: req.body.agencia_envio_id,
+    };
+    if (bodyEnvio.agencia_envio_id) {
+      const { data: agencia } = await supabase
+        .from('agencias_envio')
+        .select('id, nombre')
+        .eq('id', bodyEnvio.agencia_envio_id)
+        .single();
+      if (agencia) {
+        bodyEnvio.agencia_envio = agencia.nombre;
+      } else {
+        return res.status(400).json({ error: 'Agencia de envío no encontrada' });
+      }
+    }
+
     const orden = await construirOrden(
       usuario_id,
-      { items, forma_pago, tipo_envio, direccion_envio_id, agencia_envio },
+      bodyEnvio,
       { creado_por_staff_id: req.staff.id, saltarValidacionPin: true }
     );
 

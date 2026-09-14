@@ -46,6 +46,7 @@ import staffPreciosRoutes from './routes/staff.precios.routes.js';
 import staffCreditoRoutes from './routes/staff.credito.routes.js';
 import staffTesoreriaRoutes from './routes/staff.tesoreria.routes.js';
 import staffReportesRoutes from './routes/staff.reportes.routes.js';
+import staffLogisticaRoutes from './routes/staff.logistica.routes.js';
 
 dotenv.config();
 
@@ -107,6 +108,7 @@ app.use('/staff/precios', staffPreciosRoutes);
 app.use('/staff/credito', staffCreditoRoutes);
 app.use('/staff/tesoreria', staffTesoreriaRoutes);
 app.use('/staff/reportes', staffReportesRoutes);
+app.use('/staff/logistica', staffLogisticaRoutes);
 app.use('/staff', staffRoutes);
 app.use('/delivery-tarifas', tarifasDeliveryRoutes);
 app.use('/requerimientos', requerimientosRoutes);

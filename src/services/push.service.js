@@ -37,6 +37,7 @@ const TIPO_A_CATEGORIA = {
   recordatorio_cobro: 'credito',
   credito_bloqueado: 'credito',
   credito_desbloqueado: 'credito',
+  orden_incidencia: 'ordenes',
   oferta: 'ofertas',
 };
 

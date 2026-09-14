@@ -34,3 +34,33 @@ export async function getDireccionesStaff(req, res) {
     res.status(500).json({ error: 'Error del servidor' });
   }
 }
+
+// PATCH /staff/direcciones/:id — acciones puntuales del personal (logística)
+// sobre la dirección de un cliente: teléfono de contacto, preferida, nota de
+// entrega. No permite renombrar ni tocar la dirección en sí.
+export async function updateDireccionStaff(req, res) {
+  const { id } = req.params;
+  const { telefono_contacto, es_preferida, nota_entrega } = req.body;
+
+  const updates = {};
+  if (telefono_contacto !== undefined) updates.telefono_contacto = telefono_contacto;
+  if (es_preferida !== undefined) updates.es_preferida = Boolean(es_preferida);
+  if (nota_entrega !== undefined) updates.nota_entrega = nota_entrega;
+  if (Object.keys(updates).length === 0) {
+    return res.status(400).json({ error: 'No se proporcionaron campos para actualizar' });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('direcciones_envio')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error || !data) return res.status(404).json({ error: 'Dirección no encontrada' });
+    res.json(data);
+  } catch (err) {
+    console.error('Error al actualizar dirección (staff):', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
