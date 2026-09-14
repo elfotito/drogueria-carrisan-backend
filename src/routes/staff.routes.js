@@ -6,7 +6,6 @@ import {
   marcarEntregado,
   crearOrdenParaCliente,
   crearBridgeAdmin,
-  buscarClientes,
   getDireccionesDeCliente,
   getPresupuestosDeCliente,
   crearPresupuestoParaCliente,
@@ -14,6 +13,13 @@ import {
   recotizarPresupuestoStaff,
   generarPedidoDesdePresupuesto,
 } from '../controllers/staff.controller.js';
+import {
+  listarClientes,
+  getClienteDetalle,
+  getOrdenesDeCliente,
+  getCotizacionesDeCliente,
+  getRequerimientosDeCliente,
+} from '../controllers/staff.clientes.controller.js';
 import { verifyStaffJWT, checkRolStaff } from '../middleware/staffAuth.js';
 
 const router = Router();
@@ -26,10 +32,14 @@ router.post('/registro', registrarStaff);
 router.post('/login', loginStaff);
 router.get('/despacho', verifyStaffJWT, checkRolStaff(ROLES_DESPACHO), getColaDespacho);
 router.patch('/despacho/:id/entregar', verifyStaffJWT, checkRolStaff(ROLES_DESPACHO), marcarEntregado);
-router.get('/clientes', verifyStaffJWT, checkRolStaff(ROLES_VENTAS), buscarClientes);
+router.get('/clientes', verifyStaffJWT, checkRolStaff(ROLES_VENTAS), listarClientes);
+router.get('/clientes/:id/detalle', verifyStaffJWT, checkRolStaff(ROLES_VENTAS), getClienteDetalle);
+router.get('/clientes/:id/ordenes', verifyStaffJWT, checkRolStaff(ROLES_VENTAS), getOrdenesDeCliente);
+router.get('/clientes/:id/cotizaciones', verifyStaffJWT, checkRolStaff(ROLES_VENTAS), getCotizacionesDeCliente);
+router.get('/clientes/:id/requerimientos', verifyStaffJWT, checkRolStaff(ROLES_VENTAS), getRequerimientosDeCliente);
 router.get('/clientes/:id/direcciones', verifyStaffJWT, checkRolStaff(ROLES_VENTAS), getDireccionesDeCliente);
-router.post('/ordenes', verifyStaffJWT, checkRolStaff(ROLES_VENTAS), crearOrdenParaCliente);
 router.get('/clientes/:id/presupuestos', verifyStaffJWT, checkRolStaff(ROLES_VENTAS), getPresupuestosDeCliente);
+router.post('/ordenes', verifyStaffJWT, checkRolStaff(ROLES_VENTAS), crearOrdenParaCliente);
 router.post('/presupuestos', verifyStaffJWT, checkRolStaff(ROLES_VENTAS), crearPresupuestoParaCliente);
 router.get('/presupuestos/:id', verifyStaffJWT, checkRolStaff(ROLES_VENTAS), getPresupuestoStaff);
 router.post('/presupuestos/:id/recotizar', verifyStaffJWT, checkRolStaff(ROLES_VENTAS), recotizarPresupuestoStaff);

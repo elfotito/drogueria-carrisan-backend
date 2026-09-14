@@ -128,9 +128,9 @@ export async function getMisDocumentos(req, res) {
   }
 }
 
-// GET /documentos (admin) — cola, filtrable por estado
+// GET /documentos (admin + staff) — cola, filtrable por estado y usuario_id
 export async function getSolicitudesDocumentos(req, res) {
-  const { estado } = req.query;
+  const { estado, usuario_id } = req.query;
 
   try {
     let query = supabase
@@ -140,6 +140,9 @@ export async function getSolicitudesDocumentos(req, res) {
 
     if (estado) {
       query = query.eq('estado', estado);
+    }
+    if (usuario_id) {
+      query = query.eq('usuario_id', Number(usuario_id));
     }
 
     const { data, error } = await query;
