@@ -755,18 +755,13 @@ export async function getReportesPago(req, res) {
 }
 
 // PATCH /staff/contabilidad/reportes-pago/:id/verificar — verifica un
-// reporte: genera factura que salda las órdenes, crea pago, y marca el
-// pago como verificado. El pago es condición (estado_pago), no estado
-// logístico: las órdenes ya están en 'preparando'. Solo las órdenes
-// LEGACY que quedaron en 'procesando' migran a 'preparando' (con su
-// evento de historial). created_by = req.staff.id.
+// reporte: SOLO confirma el pago. NO genera factura (la factura o el
+// recibo de cobro los emite el módulo de Facturación aparte, según el
+// caso). Crea el pago (condición, estado_pago), marca el reporte como
+// verificado y migra las órdenes LEGACY en 'procesando' a 'preparando'
+// con su evento de historial. created_by = req.staff.id.
 export async function verificarReportePago(req, res) {
   const { id } = req.params;
-  const { numero_factura, nota } = req.body;
-
-  if (!numero_factura) {
-    return res.status(400).json({ error: 'numero_factura es requerido para generar la factura' });
-  }
 
   try {
     const { data: reporte, error: errorReporte } = await supabase
@@ -784,37 +779,6 @@ export async function verificarReportePago(req, res) {
 
     const orden_ids = reporte.reporte_pago_ordenes.map(v => v.orden_id);
 
-    const { data: factura, error: errorFactura } = await supabase
-      .from('facturas')
-      .insert({
-        usuario_id: reporte.usuario_id,
-        numero_factura,
-        monto: reporte.monto_usd,
-        monto_bs: reporte.monto_bs,
-        tasa_usada: reporte.tasa_usada,
-        estado: 'pendiente',
-        created_by: req.staff.id,
-        nota: nota || null,
-      })
-      .select()
-      .single();
-
-    if (errorFactura) throw errorFactura;
-
-    const registrosFacturaOrdenes = orden_ids.map(orden_id => ({
-      factura_id: factura.id,
-      orden_id
-    }));
-
-    const { error: errorFacturaOrdenes } = await supabase
-      .from('factura_ordenes')
-      .insert(registrosFacturaOrdenes);
-
-    if (errorFacturaOrdenes) {
-      await supabase.from('facturas').delete().eq('id', factura.id);
-      throw errorFacturaOrdenes;
-    }
-
     const { data: pago, error: errorPago } = await supabase
       .from('pagos')
       .insert({
@@ -831,22 +795,6 @@ export async function verificarReportePago(req, res) {
 
     if (errorPago) throw errorPago;
 
-    const { error: errorPagoFactura } = await supabase
-      .from('pago_facturas')
-      .insert({
-        pago_id: pago.id,
-        factura_id: factura.id,
-      });
-
-    if (errorPagoFactura) throw errorPagoFactura;
-
-    const { error: errorUpdateFactura } = await supabase
-      .from('facturas')
-      .update({ estado: 'pagada' })
-      .eq('id', factura.id);
-
-    if (errorUpdateFactura) throw errorUpdateFactura;
-
     const { data: reporteActualizado, error: errorUpdateReporte } = await supabase
       .from('reportes_pago')
       .update({
@@ -860,10 +808,10 @@ export async function verificarReportePago(req, res) {
 
     if (errorUpdateReporte) throw errorUpdateReporte;
 
-    // 8. Saber qué órdenes del reporte aún están en 'procesando' (legacy)
-    //    para migrarlas a 'preparando' con su evento de historial. Las que
-    //    ya están en 'preparando' solo cambian estado_pago (condición de
-    //    pago, no estado logístico).
+    // Saber qué órdenes del reporte aún están en 'procesando' (legacy)
+    // para migrarlas a 'preparando' con su evento de historial. Las que
+    // ya están en 'preparando' solo cambian estado_pago (condición de
+    // pago, no estado logístico).
     const { data: ordenesActuales, error: errorEstados } = await supabase
       .from('ordenes')
       .select('id, estado')
@@ -907,7 +855,6 @@ export async function verificarReportePago(req, res) {
 
     res.json({
       reporte: reporteActualizado,
-      factura,
       pago,
       orden_ids,
     });
