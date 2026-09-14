@@ -259,7 +259,7 @@ export async function construirOrden(usuario_id, datos, opciones = {}) {
   if (tipo_envio) nuevaOrden.tipo_envio = tipo_envio;
   if (direccion_envio_id) nuevaOrden.direccion_envio_id = direccion_envio_id;
   if (agencia_envio) nuevaOrden.agencia_envio = agencia_envio;
-  if (payload.agencia_envio_id) nuevaOrden.agencia_envio_id = payload.agencia_envio_id;
+  if (datos.agencia_envio_id) nuevaOrden.agencia_envio_id = datos.agencia_envio_id;
   if (creado_por_staff_id) nuevaOrden.creado_por_staff_id = creado_por_staff_id;
 
   const { data: orden, error: errorOrden } = await supabase
