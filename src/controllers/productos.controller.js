@@ -2,6 +2,21 @@ import { supabase } from '../config/supabase.js';
 import { aplicarDescuentosAProductos, aplicarDescuentoAProducto } from './descuentos.controller.js';
 import { notificarDisponibles } from './alertasDisponibilidad.controller.js';
 
+// Slugs cortos → valor real de `productos.linea` en la BD (la columna guarda
+// 'Linea Farmacia', 'Linea Hospitalaria', 'Material Medico' — ver
+// scripts/importar-tienda.mjs / reconstruir-catalogo.mjs). Permite URLs
+// limpias como `/catalogo?linea=farmacia`. Si el valor no es un slug
+// conocido, se pasa intacto (backwards-compatible).
+const NORMALIZAR_LINEA = {
+  farmacia: 'Linea Farmacia',
+  hospitalaria: 'Linea Hospitalaria',
+  'material-medico': 'Material Medico',
+  materialmedico: 'Material Medico',
+  'material_medico': 'Material Medico',
+  'linea-farmacia': 'Linea Farmacia',
+  'linea-hospitalaria': 'Linea Hospitalaria',
+};
+
 // Enriquece una lista de productos con rating_promedio y rating_total
 // usando un único batch query a la tabla valoraciones.
 export async function enriquecerConValoraciones(productos) {
@@ -115,7 +130,7 @@ export async function getProductos(req, res) {
 
     if (search) query = query.ilike('nombre_comercial', `%${search}%`);
     if (marca_id) query = query.eq('marca_id', marca_id);
-    if (linea) query = query.eq('linea', linea);
+    if (linea) query = query.eq('linea', NORMALIZAR_LINEA[String(linea).toLowerCase()] || linea);
     if (laboratorio) query = query.in('laboratorio', laboratorio.split(','));
     if (forma) query = query.in('forma', forma.split(','));
     if (disponible === 'true') query = query.eq('disponible', true);
