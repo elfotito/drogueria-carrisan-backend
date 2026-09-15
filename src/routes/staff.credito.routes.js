@@ -2,6 +2,8 @@ import { Router } from 'express';
 import {
   getAgingReport,
   getClienteCredito,
+  getLineaClientes,
+  setLineaCredito,
   getNotasCobranza,
   createNotaCobranza,
   sendRecordatorio,
@@ -15,6 +17,10 @@ const ROLES_CREDITO = ['contabilidad', 'administrador', 'director', 'admin'];
 
 // Aging report (dashboard)
 router.get('/aging', verifyStaffJWT, checkRolStaff(ROLES_CREDITO), getAgingReport);
+
+// Línea de crédito (listado de todos los clientes + ajuste manual)
+router.get('/linea/clientes', verifyStaffJWT, checkRolStaff(ROLES_CREDITO), getLineaClientes);
+router.patch('/linea/clientes/:id', verifyStaffJWT, checkRolStaff(ROLES_CREDITO), setLineaCredito);
 
 // Cliente detalle
 router.get('/clientes/:id', verifyStaffJWT, checkRolStaff(ROLES_CREDITO), getClienteCredito);

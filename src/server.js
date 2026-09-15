@@ -47,6 +47,7 @@ import staffCreditoRoutes from './routes/staff.credito.routes.js';
 import staffTesoreriaRoutes from './routes/staff.tesoreria.routes.js';
 import staffReportesRoutes from './routes/staff.reportes.routes.js';
 import staffLogisticaRoutes from './routes/staff.logistica.routes.js';
+import staffChatRoutes from './routes/staff.chat.routes.js';
 import cron from 'node-cron';
 import { actualizarTasa } from './jobs/actualizarTasa.js';
 
@@ -111,6 +112,7 @@ app.use('/staff/credito', staffCreditoRoutes);
 app.use('/staff/tesoreria', staffTesoreriaRoutes);
 app.use('/staff/reportes', staffReportesRoutes);
 app.use('/staff/logistica', staffLogisticaRoutes);
+app.use('/staff/chat', staffChatRoutes);
 app.use('/staff', staffRoutes);
 app.use('/delivery-tarifas', tarifasDeliveryRoutes);
 app.use('/requerimientos', requerimientosRoutes);

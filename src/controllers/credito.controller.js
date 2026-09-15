@@ -181,6 +181,137 @@ export async function getClienteCredito(req, res) {
 }
 
 // ---------------------------------------------------------------
+// LÍNEA DE CRÉDITO (aprobación / ajuste manual)
+// ---------------------------------------------------------------
+
+// GET /staff/credito/linea/clientes
+// Lista TODOS los clientes (con o sin línea) con su deuda actual,
+// para que Finanzas apruebe/ajuste la línea de crédito.
+export async function getLineaClientes(req, res) {
+  try {
+    const { data: clientes, error: errClientes } = await supabase
+      .from('users')
+      .select('id, nombre, email, rif_cedula, linea_credito, credito_bloqueado')
+      .order('nombre', { ascending: true });
+
+    if (errClientes) throw errClientes;
+
+    const ids = (clientes || []).map((c) => c.id);
+
+    // Deuda actual de todos en 1 query batch (patrón credito.controller L31-46)
+    const { data: ordenesRaw } = await supabase
+      .from('ordenes')
+      .select('usuario_id, total_usd')
+      .in('usuario_id', ids)
+      .neq('estado', 'cancelado')
+      .neq('estado_pago', 'verificado');
+
+    const deudaPorCliente = {};
+    for (const o of ordenesRaw || []) {
+      deudaPorCliente[o.usuario_id] = (deudaPorCliente[o.usuario_id] || 0) + Number(o.total_usd);
+    }
+
+    const reporte = (clientes || []).map((c) => {
+      const deuda_total = deudaPorCliente[c.id] || 0;
+      const linea = Number(c.linea_credito || 0);
+      return {
+        id: c.id,
+        nombre: c.nombre,
+        email: c.email,
+        rif_cedula: c.rif_cedula,
+        linea_credito: linea,
+        deuda_total,
+        saldo_disponible: linea - deuda_total,
+        credito_bloqueado: c.credito_bloqueado || false,
+      };
+    });
+
+    res.json(reporte);
+  } catch (err) {
+    console.error('Error al listar línea de crédito:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
+// PATCH /staff/credito/linea/clientes/:id
+// Fija/ajusta manualmente la línea de crédito de un cliente y registra
+// la modificación en ampliaciones_credito (historial + staff_id).
+export async function setLineaCredito(req, res) {
+  const { id } = req.params;
+  const usuario_id = Number(id);
+  const { linea_credito, motivo } = req.body;
+
+  const monto = Number(linea_credito);
+  if (!Number.isFinite(monto) || monto < 0) {
+    return res.status(400).json({ error: 'linea_credito debe ser un monto numérico >= 0' });
+  }
+
+  try {
+    const { data: cliente, error: errC } = await supabase
+      .from('users')
+      .select('id, nombre, email, linea_credito')
+      .eq('id', usuario_id)
+      .single();
+
+    if (errC || !cliente) {
+      return res.status(404).json({ error: 'Cliente no encontrado' });
+    }
+
+    const linea_anterior = Number(cliente.linea_credito || 0);
+
+    const { data: actualizado, error: errU } = await supabase
+      .from('users')
+      .update({ linea_credito: monto })
+      .eq('id', usuario_id)
+      .select('id, nombre, linea_credito')
+      .single();
+
+    if (errU) throw errU;
+
+    // Registro histórico de la modificación
+    await supabase.from('ampliaciones_credito').insert({
+      usuario_id,
+      linea_anterior,
+      linea_nueva: monto,
+      motivo: motivo || null,
+      staff_id: req.staff?.id || null,
+    });
+
+    // Notificar al cliente (tipos ya admitidos por notificaciones_tipo_check)
+    if (monto > 0) {
+      await crearNotificacion(
+        usuario_id,
+        'credito_desbloqueado',
+        'Línea de crédito actualizada',
+        linea_anterior === 0
+          ? `Tu línea de crédito ha sido aprobada por $${monto.toFixed(2)}.`
+          : `Tu línea de crédito fue ajustada de $${linea_anterior.toFixed(2)} a $${monto.toFixed(2)}.`,
+        null
+      );
+    } else {
+      await crearNotificacion(
+        usuario_id,
+        'credito_bloqueado',
+        'Línea de crédito suspendida',
+        'Tu línea de crédito fue ajustada a $0. Contacta a la empresa ante cualquier duda.',
+        null
+      );
+    }
+
+    res.json({
+      id: actualizado.id,
+      nombre: actualizado.nombre,
+      linea_anterior,
+      linea_nueva: Number(actualizado.linea_credito),
+      motivo: motivo || null,
+    });
+  } catch (err) {
+    console.error('Error al ajustar línea de crédito:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
+// ---------------------------------------------------------------
 // NOTAS DE COBRANZA
 // ---------------------------------------------------------------
 

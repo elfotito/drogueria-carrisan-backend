@@ -955,6 +955,84 @@ export async function getOrdenesProcesando(req, res) {
   }
 }
 
+// PATCH /staff/contabilidad/ordenes/:id/confirmar-pago — confirmación
+// directa del pago por parte del staff (sin reporte de pago del cliente).
+// Crea un registro en `pagos`, marca `estado_pago='verificado'` y, si la
+// orden está en estado legacy 'procesando', la migra a 'preparando'.
+export async function confirmarPagoOrden(req, res) {
+  const { id } = req.params;
+
+  try {
+    const { data: orden, error } = await supabase
+      .from('ordenes')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error || !orden) {
+      return res.status(404).json({ error: 'Orden no encontrada' });
+    }
+    if (orden.forma_pago !== 'contado') {
+      return res.status(400).json({ error: 'Solo se pueden confirmar pagos de órdenes de contado' });
+    }
+    if (!['esperando', 'reportado'].includes(orden.estado_pago)) {
+      return res.status(400).json({ error: 'El pago de esta orden ya fue verificado o no está pendiente' });
+    }
+    if (!['preparando', 'procesando'].includes(orden.estado)) {
+      return res.status(400).json({ error: `No se puede confirmar el pago de una orden en estado '${orden.estado}'` });
+    }
+
+    const { data: pago, error: errorPago } = await supabase
+      .from('pagos')
+      .insert({
+        usuario_id: orden.usuario_id,
+        monto: orden.total_usd,
+        tipo: 'verificacion_staff',
+        detalle: `Pago verificado por staff — Orden #${orden.id}`,
+        created_by_staff: req.staff.id,
+      })
+      .select()
+      .single();
+
+    if (errorPago) throw errorPago;
+
+    const { error: errorUpdate } = await supabase
+      .from('ordenes')
+      .update({ estado_pago: 'verificado' })
+      .eq('id', id);
+
+    if (errorUpdate) throw errorUpdate;
+
+    if (orden.estado === 'procesando') {
+      const { error: errorEstado } = await supabase
+        .from('ordenes')
+        .update({ estado: 'preparando' })
+        .eq('id', id);
+
+      if (errorEstado) throw errorEstado;
+
+      const { error: errorHistorial } = await supabase
+        .from('ordenes_historial')
+        .insert({ orden_id: id, estado: 'preparando' });
+
+      if (errorHistorial) throw errorHistorial;
+    }
+
+    await crearNotificacion(
+      orden.usuario_id,
+      'pago_verificado',
+      'Pago verificado',
+      `Tu pago fue verificado. Tu orden #${orden.id} continúa su preparación.`,
+      null
+    );
+
+    res.json({ pago, orden_id: Number(id) });
+  } catch (err) {
+    console.error('Error al confirmar pago de orden (contabilidad):', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
 // PATCH /staff/contabilidad/ordenes/:id/cancelar — cancela una orden de
 // contado en preparación ('preparando'; legacy 'procesando') cuyo pago aún
 // no está verificado (esperando/reportado).
