@@ -48,6 +48,8 @@ import staffTesoreriaRoutes from './routes/staff.tesoreria.routes.js';
 import staffReportesRoutes from './routes/staff.reportes.routes.js';
 import staffLogisticaRoutes from './routes/staff.logistica.routes.js';
 import staffChatRoutes from './routes/staff.chat.routes.js';
+import staffCuponesRoutes from './routes/staff.cupones.routes.js';
+import cuponesRoutes from './routes/cupones.routes.js';
 import cron from 'node-cron';
 import { actualizarTasa } from './jobs/actualizarTasa.js';
 
@@ -113,6 +115,7 @@ app.use('/staff/tesoreria', staffTesoreriaRoutes);
 app.use('/staff/reportes', staffReportesRoutes);
 app.use('/staff/logistica', staffLogisticaRoutes);
 app.use('/staff/chat', staffChatRoutes);
+app.use('/staff/cupones', staffCuponesRoutes);
 app.use('/staff', staffRoutes);
 app.use('/delivery-tarifas', tarifasDeliveryRoutes);
 app.use('/requerimientos', requerimientosRoutes);
@@ -124,6 +127,7 @@ app.use('/subusuarios', subusuariosRoutes);
 app.use('/admin/analytics', analyticsRoutes);
 app.use('/push', pushRoutes);
 app.use('/promociones', promocionesRoutes);
+app.use('/cupones', cuponesRoutes);
 app.use('/products', valoracionesRoutes);
 
 // Cron: actualizar tasa de cambio a las 18:00 hora Venezuela (lunes a viernes)
