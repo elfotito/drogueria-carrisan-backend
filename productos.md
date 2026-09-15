@@ -113,6 +113,24 @@ Se unificaron nombres de laboratorio en `productos` y `productos_catalogo` (apli
 
 ---
 
+## 4b. Categorías de tienda — filtro por sistema terapéutico (IMPLEMENTADO 2026-09-15)
+
+El `/catalogo` de la tienda filtra por **categoría terapéutica** (multi-categoría por producto, iconos Lucide), no por `linea`. Las categorías NUNCA se ponen a mano en la BD: la fuente única de definición es `src/config/categoriasTienda.js` y el backfill es `scripts/clasificar-categorias.mjs`.
+
+**Tablas** (migración `src/migrations/032_categorias_tienda.sql`):
+- `categorias_tienda` (16 filas seed): `id text PK` (kebab, ej. `analgesicos`), `nombre text` (visible), `icono text` (nombre Lucide: Pill, HeartPulse, Activity, Utensils, Citrus, Brain, Flower2, Wind, Thermometer, HandHeart, Eye, ShieldPlus, Bug, Venus, Mars, Cross), `orden integer`. **NO tiene `descripcion`** (el metadata del backend selecciona solo `id, nombre, icono, orden`).
+- `producto_categorias`: `producto_id integer REFERENCES productos(id) ON DELETE CASCADE`, `categoria text REFERENCES categorias_tienda(id) ON DELETE CASCADE`, PK `(producto_id, categoria)` + índice btree por `categoria`.
+
+**Clasificador** `scripts/clasificar-categorias.mjs` (idempotente, TRUNCATE+insert en transacción con retry 40P01): prioridad 1 = códigos ATC del producto (vía `producto_moleculas→moleculas_referencias.atc_id→atc_clasificaciones`, subiendo por cadena `padre_id` para dominios ausentes); prioridad 2 = keywords de `categoriasTienda.js`; prioridad 3 = `forma`; sobrante → `hospitalario` si `linea='Linea Hospitalaria'` o la forma es INYECTABLE. **Matcher de keywords**: palabra exacta `\bKW\b` (<5 chars), frase exacta `\bKW1\s+KW2\b` (con espacio), **prefijo de token** `\bKW` (≥5 chars, stemming). Guardas: `piel`/`ojos-oidos` se eliminan si no hay señal tópica (FORMAS_TOPICAS o RE_SEÑAL_TOPICA) — el ATC es por-molécula y mete sistémicos a piel (diclofenaco D11AX18, clorfeniramina D04AA91, brimonidina D11AX21); si el producto es manifiestamente oftálmico/ótico (RE_OFTA_OTICO / FORMAS_OFTALMO_OTICAS) va SOLO a `ojos-oidos`.
+
+**Estado actual**: 2,381 asignaciones / **1,974 de 2,317 productos (85%)** con ≥1 categoría. Conteos: analgesicos 345, cardiovascular 436, antidiabeticos 64, digestivo 185, vitaminas 157, nervioso 237, alergia 109, respiratorio 93, tos-resfriado 73, piel 137, ojos-oidos 52, antiinfecciosos 246, antiparasitarios 33, salud-femenina 79, salud-masculina 50, hospitalario 85. **343 sin categoría** → `data/productos_sin_categoria_2026-09-15.csv` (marcas comerciales sin molécula en texto ni bridge: TRAMAL, LODIPIN, DEFLAZACORT…). Gap de datos conocido, se reporta al dueño; corregir = completar moléculas, NO editar `producto_categorias` a mano.
+
+**Backend**: `GET /products?categoria=<id>` (filtra por `producto_categorias` con 1 `.in('id', ids)`; categoría inexistente → filas vacías, no error). `GET /products/metadata` devuelve `{ laboratorios, formas, categorias }` (`categorias` = tabla completa ordenada por `orden`).
+
+**Frontend** `Catalogo.jsx`: pills dinámicos desde `/products/metadata` (antes hardcodeados y rotos porque enviaban el nombre como `linea`). Clic → `searchParams.categoria`. Mapeo local `id→componente Lucide` (`ICONOS_CATEGORIAS`, fallback `LayoutGrid`). **Regla**: si se agrega una categoría, editar `categoriasTienda.js` + re-correr el clasificador + verificar que el icono exista en `lucide-react` y en el mapeo del frontend.
+
+---
+
 ## 5. Protocolo para ajustes (flujo obligatorio de cada solicitud)
 
 1. **Leer este archivo** primero.
@@ -132,4 +150,4 @@ Se unificaron nombres de laboratorio en `productos` y `productos_catalogo` (apli
 
 - **Estado de TRAMAL** (3 productos manuales, ids 39605/39606/39611): decisión pendiente — NO purgar sin aviso.
 - CSVs de revisión de moléculas en `data/` (duplicados, sin ATC, overrides, no_match): decisiones manuales del dueño, no bloquean.
-- El `/catalogo` de la tienda muestra pills de categoría hardcodeados; los productos nuevos quedan fuera de esos pills (mejora futura, no urgente).
+- 343 productos sin categoría de tienda (ver sección 4b, CSV en `data/`): la vía correcta es completar moléculas, no editar `producto_categorias` a mano.

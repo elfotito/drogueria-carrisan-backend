@@ -30,12 +30,13 @@ export async function enriquecerConValoraciones(productos) {
   });
 }
 
-// GET /products?search=&marca_id=&sort=&molecula=&linea=&laboratorio=&forma=&disponible=&sin_precio=&precio_min=&precio_max=&page=&limit=
+// GET /products?search=&marca_id=&sort=&molecula=&categoria=&linea=&laboratorio=&forma=&disponible=&sin_precio=&precio_min=&precio_max=&page=&limit=
+// `categoria` filtra por categoría de la tienda (categorias_tienda/producto_categorias).
 // Sin `page` retorna un ARRAY plano (usado por Home, carruseles, buscadores, etc.)
 // Con `page` retorna { productos, total, hasMore, page } (usado por Catalogo).
 export async function getProductos(req, res) {
   const {
-    search, marca_id, sort, molecula,
+    search, marca_id, sort, molecula, categoria,
     linea, laboratorio, forma, disponible, sin_precio,
     precio_min, precio_max,
     page, limit
@@ -89,6 +90,24 @@ export async function getProductos(req, res) {
       }
     }
 
+    // Filtro por categoría de la tienda (categorias_tienda/producto_categorias).
+    // Se resuelve aparte igual que `molecula`: la relación vive en otra tabla.
+    let productoIdsPorCategoria = null;
+    if (categoria) {
+      const { data: relacionesCategoria, error: errorCategoria } = await supabase
+        .from('producto_categorias')
+        .select('producto_id')
+        .eq('categoria', categoria);
+      if (errorCategoria) throw errorCategoria;
+
+      productoIdsPorCategoria = [...new Set((relacionesCategoria || []).map((r) => r.producto_id))];
+      if (productoIdsPorCategoria.length === 0) {
+        return usarPaginacion
+          ? res.json({ productos: [], total: 0, hasMore: false, page: pageNum })
+          : res.json([]);
+      }
+    }
+
     let query = supabase
       .from('productos')
       .select('*, marcas(id, nombre)', usarPaginacion ? { count: 'exact' } : undefined)
@@ -106,6 +125,7 @@ export async function getProductos(req, res) {
     if (precio_min) query = query.gte('precio_usd', precio_min);
     if (precio_max) query = query.lte('precio_usd', precio_max);
     if (productoIdsPorMolecula) query = query.in('id', productoIdsPorMolecula);
+    if (productoIdsPorCategoria) query = query.in('id', productoIdsPorCategoria);
 
     query = query.order(orden.column, { ascending: orden.ascending });
 
@@ -138,7 +158,7 @@ export async function getProductos(req, res) {
   }
 }
 
-// GET /products/metadata — valores distintos de laboratorio/forma para poblar filtros
+// GET /products/metadata — valores distintos de laboratorio/forma y categorías de la tienda
 export async function getProductosMetadata(req, res) {
   try {
     const { data, error } = await supabase
@@ -148,10 +168,16 @@ export async function getProductosMetadata(req, res) {
 
     if (error) throw error;
 
+    const { data: categorias, error: errorCategorias } = await supabase
+      .from('categorias_tienda')
+      .select('id, nombre, icono, orden')
+      .order('orden');
+    if (errorCategorias) throw errorCategorias;
+
     const laboratorios = [...new Set((data || []).map((p) => p.laboratorio).filter(Boolean))].sort();
     const formas = [...new Set((data || []).map((p) => p.forma).filter(Boolean))].sort();
 
-    res.json({ laboratorios, formas });
+    res.json({ laboratorios, formas, categorias });
   } catch (err) {
     console.error('Error al obtener metadata de productos:', err);
     res.status(500).json({ error: 'Error del servidor' });
