@@ -47,6 +47,8 @@ import staffCreditoRoutes from './routes/staff.credito.routes.js';
 import staffTesoreriaRoutes from './routes/staff.tesoreria.routes.js';
 import staffReportesRoutes from './routes/staff.reportes.routes.js';
 import staffLogisticaRoutes from './routes/staff.logistica.routes.js';
+import cron from 'node-cron';
+import { actualizarTasa } from './jobs/actualizarTasa.js';
 
 dotenv.config();
 
@@ -121,6 +123,11 @@ app.use('/admin/analytics', analyticsRoutes);
 app.use('/push', pushRoutes);
 app.use('/promociones', promocionesRoutes);
 app.use('/products', valoracionesRoutes);
+
+// Cron: actualizar tasa de cambio a las 18:00 hora Venezuela (lunes a viernes)
+cron.schedule('0 18 * * 1-5', () => {
+  actualizarTasa();
+}, { timezone: 'America/Caracas' });
 
 app.listen(PORT, () => {
   console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
