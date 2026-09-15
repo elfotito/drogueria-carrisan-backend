@@ -123,13 +123,13 @@ export class ErrorOrden extends Error {
 
 // POST /orders
 export async function createOrden(req, res) {
-  const { items, forma_pago, tipo_envio, direccion_envio_id, agencia_envio } = req.body;
+  const { items, forma_pago, tipo_envio, direccion_envio_id, agencia_envio, sub_usuario_id } = req.body;
   const usuario_id = req.user.id;
 
   try {
     const orden = await construirOrden(
       usuario_id,
-      { items, forma_pago, tipo_envio, direccion_envio_id, agencia_envio },
+      { items, forma_pago, tipo_envio, direccion_envio_id, agencia_envio, sub_usuario_id },
       {}
     );
     res.status(201).json(orden);
@@ -156,8 +156,8 @@ export async function createOrden(req, res) {
 //     (no hay sesión de sub-usuario de la que validar PIN).
 // ---------------------------------------------------------
 export async function construirOrden(usuario_id, datos, opciones = {}) {
-  const { items, forma_pago, tipo_envio, direccion_envio_id, agencia_envio } = datos;
-  const { creado_por_staff_id = null } = opciones;
+  const { items, forma_pago, tipo_envio, direccion_envio_id, agencia_envio, sub_usuario_id } = datos;
+  const { creado_por_staff_id = null, saltarValidacionPin = false } = opciones;
 
   if (!items || !Array.isArray(items) || items.length === 0) {
     throw new ErrorOrden(400, 'Debe incluir al menos un item');
@@ -165,6 +165,24 @@ export async function construirOrden(usuario_id, datos, opciones = {}) {
 
   // forma_pago solo puede ser 'contado' o 'credito'. Si no viene, asumimos contado.
   const formaPagoSolicitada = forma_pago === 'credito' ? 'credito' : 'contado';
+
+  // Sub-usuario (opcional): "¿Quién hace este pedido?" del checkout cliente.
+  // El PIN ya se verificó en el frontend; acá solo re-validamos que el
+  // sub-usuario pertenezca a la cuenta autenticada y esté activo. El
+  // flujo staff (saltarValidacionPin) nunca manda sub_usuario_id — lo
+  // descartamos sin validar porque no hay sesión de cliente de la que
+  // verificar pertenencia.
+  if (sub_usuario_id && !saltarValidacionPin) {
+    const { data: subUsuario, error: errorSub } = await supabase
+      .from('sub_usuarios')
+      .select('id')
+      .eq('id', sub_usuario_id)
+      .eq('usuario_id', usuario_id)
+      .eq('activo', true)
+      .single();
+
+    if (errorSub || !subUsuario) throw errorSub || new ErrorOrden(400, 'Sub-usuario no válido');
+  }
 
   const productoIds = items.map(item => item.producto_id);
   const { data: productos, error: errorProductos } = await supabase
@@ -261,6 +279,7 @@ export async function construirOrden(usuario_id, datos, opciones = {}) {
   if (agencia_envio) nuevaOrden.agencia_envio = agencia_envio;
   if (datos.agencia_envio_id) nuevaOrden.agencia_envio_id = datos.agencia_envio_id;
   if (creado_por_staff_id) nuevaOrden.creado_por_staff_id = creado_por_staff_id;
+  if (sub_usuario_id) nuevaOrden.sub_usuario_id = sub_usuario_id;
 
   const { data: orden, error: errorOrden } = await supabase
     .from('ordenes')
@@ -310,7 +329,7 @@ export async function getOrdenes(req, res) {
   try {
     let query = supabase
       .from('ordenes')
-      .select('*, users(id, nombre, email), ordenes_items(*, productos(nombre_comercial))')
+      .select('*, users(id, nombre, email), sub_usuarios(nombre), ordenes_items(*, productos(nombre_comercial))')
       .order('created_at', { ascending: false });
 
     if (!req.user.es_admin) {
@@ -333,7 +352,7 @@ export async function getOrdenById(req, res) {
   try {
     const { data, error } = await supabase
       .from('ordenes')
-      .select('*, users(id, nombre, email), ordenes_items(*, productos(nombre_comercial))')
+      .select('*, users(id, nombre, email), sub_usuarios(nombre), ordenes_items(*, productos(nombre_comercial))')
       .eq('id', id)
       .single();
 
