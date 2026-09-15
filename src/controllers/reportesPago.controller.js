@@ -168,19 +168,15 @@ export async function getReportePagoById(req, res) {
 
 // ---------------------------------------------------------------
 // PATCH /reportes-pago/:id/verificar (admin)
-// Al verificar: genera una factura agrupando las órdenes del reporte,
-// crea un pago que la salda de inmediato (sin parciales), y marca el pago
-// como verificado. El pago es condición (estado_pago), no estado logístico:
-// las órdenes ya están en 'preparando'. Solo las órdenes LEGACY que
-// quedaron en 'procesando' migran a 'preparando' (con su historial).
+// Solo CONFIRMA el pago: crea el pago (condición de pago de las órdenes
+// del reporte) y marca el reporte como verificado. NO genera factura ni
+// recibo — eso lo emite el módulo de Facturación aparte (misma regla que
+// la verificación de /staff/contabilidad). El pago es condición, no estado
+// logístico: las órdenes ya están en 'preparando'. Solo las órdenes LEGACY
+// que quedaron en 'procesando' migran a 'preparando' (con su historial).
 // ---------------------------------------------------------------
 export async function verificarReportePago(req, res) {
   const { id } = req.params;
-  const { numero_factura, nota } = req.body;
-
-  if (!numero_factura) {
-    return res.status(400).json({ error: 'numero_factura es requerido para generar la factura' });
-  }
 
   try {
     // 1. Obtener el reporte con sus órdenes
@@ -199,40 +195,7 @@ export async function verificarReportePago(req, res) {
 
     const orden_ids = reporte.reporte_pago_ordenes.map(v => v.orden_id);
 
-    // 2. Crear la factura
-    const { data: factura, error: errorFactura } = await supabase
-      .from('facturas')
-      .insert({
-        usuario_id: reporte.usuario_id,
-        numero_factura,
-        monto: reporte.monto_usd,
-        monto_bs: reporte.monto_bs,
-        tasa_usada: reporte.tasa_usada,
-        estado: 'pendiente',
-        created_by: req.user.id,
-        nota: nota || null
-      })
-      .select()
-      .single();
-
-    if (errorFactura) throw errorFactura;
-
-    // 3. Vincular factura con órdenes
-    const registrosFacturaOrdenes = orden_ids.map(orden_id => ({ 
-      factura_id: factura.id, 
-      orden_id 
-    }));
-    
-    const { error: errorFacturaOrdenes } = await supabase
-      .from('factura_ordenes')
-      .insert(registrosFacturaOrdenes);
-
-    if (errorFacturaOrdenes) {
-      await supabase.from('facturas').delete().eq('id', factura.id);
-      throw errorFacturaOrdenes;
-    }
-
-    // 4. Crear el pago
+    // 2. Crear el pago
     const { data: pago, error: errorPago } = await supabase
       .from('pagos')
       .insert({
@@ -249,25 +212,7 @@ export async function verificarReportePago(req, res) {
 
     if (errorPago) throw errorPago;
 
-    // 5. Vincular pago con factura
-    const { error: errorPagoFactura } = await supabase
-      .from('pago_facturas')
-      .insert({ 
-        pago_id: pago.id, 
-        factura_id: factura.id 
-      });
-
-    if (errorPagoFactura) throw errorPagoFactura;
-
-    // 6. Marcar factura como pagada
-    const { error: errorUpdateFactura } = await supabase
-      .from('facturas')
-      .update({ estado: 'pagada' })
-      .eq('id', factura.id);
-
-    if (errorUpdateFactura) throw errorUpdateFactura;
-
-    // 7. Actualizar el reporte
+    // 3. Actualizar el reporte
     const { data: reporteActualizado, error: errorUpdateReporte } = await supabase
       .from('reportes_pago')
       .update({
@@ -281,7 +226,7 @@ export async function verificarReportePago(req, res) {
 
     if (errorUpdateReporte) throw errorUpdateReporte;
 
-    // 8. Saber qué órdenes del reporte aún están en 'procesando' (legacy)
+    // 4. Saber qué órdenes del reporte aún están en 'procesando' (legacy)
     //    para migrarlas a 'preparando' con su historial.
     const { data: ordenesActuales, error: errorEstados } = await supabase
       .from('ordenes')
@@ -316,7 +261,7 @@ export async function verificarReportePago(req, res) {
       if (errorHistorial) throw errorHistorial;
     }
 
-    // 9. Notificar al cliente
+    // 5. Notificar al cliente
     await crearNotificacion(
       reporte.usuario_id,
       'pago_verificado',
@@ -327,7 +272,6 @@ export async function verificarReportePago(req, res) {
 
     res.json({ 
       reporte: reporteActualizado, 
-      factura, 
       pago, 
       orden_ids 
     });

@@ -254,7 +254,7 @@ export async function createPago(req, res) {
         monto,
         tipo: tipo || 'abono',
         detalle,
-        created_by: req.staff.id,
+        created_by_staff: req.staff.id,
       })
       .select()
       .single();
@@ -759,7 +759,7 @@ export async function getReportesPago(req, res) {
 // recibo de cobro los emite el módulo de Facturación aparte, según el
 // caso). Crea el pago (condición, estado_pago), marca el reporte como
 // verificado y migra las órdenes LEGACY en 'procesando' a 'preparando'
-// con su evento de historial. created_by = req.staff.id.
+// con su evento de historial. created_by_staff = req.staff.id.
 export async function verificarReportePago(req, res) {
   const { id } = req.params;
 
@@ -788,7 +788,7 @@ export async function verificarReportePago(req, res) {
         tasa_usada: reporte.tasa_usada,
         tipo: 'reporte_cliente',
         detalle: `Pago verificado desde reporte #${reporte.id} (Bs. ${Number(reporte.monto_bs).toFixed(2)} a tasa ${reporte.tasa_usada})`,
-        created_by: req.staff.id,
+        created_by_staff: req.staff.id,
       })
       .select()
       .single();
@@ -799,7 +799,7 @@ export async function verificarReportePago(req, res) {
       .from('reportes_pago')
       .update({
         estado: 'verificado',
-        verificado_por: req.staff.id,
+        verificado_por_staff: req.staff.id,
         fecha_verificacion: new Date().toISOString(),
       })
       .eq('id', id)
@@ -890,7 +890,7 @@ export async function rechazarReportePago(req, res) {
       .update({
         estado: 'rechazado',
         nota_rechazo: nota_rechazo || null,
-        verificado_por: req.staff.id,
+        verificado_por_staff: req.staff.id,
         fecha_verificacion: new Date().toISOString(),
       })
       .eq('id', id)
