@@ -1,5 +1,6 @@
 import { supabase } from '../config/supabase.js';
 import { crearNotificacion } from './notificaciones.controller.js';
+import { buscarCuponValido, calcularDescuento, consumirCupon, liberarCupon } from './cupones.controller.js';
 
 // ---------------------------------------------------------
 // Pipeline de estados de una orden. REGLA CENTRAL (ver AGENTS.md):
@@ -156,7 +157,7 @@ export async function createOrden(req, res) {
 //     (no hay sesión de sub-usuario de la que validar PIN).
 // ---------------------------------------------------------
 export async function construirOrden(usuario_id, datos, opciones = {}) {
-  const { items, forma_pago, tipo_envio, direccion_envio_id, agencia_envio, sub_usuario_id } = datos;
+  const { items, forma_pago, tipo_envio, direccion_envio_id, agencia_envio, sub_usuario_id, codigo_cupon } = datos;
   const { creado_por_staff_id = null, saltarValidacionPin = false } = opciones;
 
   if (!items || !Array.isArray(items) || items.length === 0) {
@@ -218,6 +219,25 @@ export async function construirOrden(usuario_id, datos, opciones = {}) {
   });
 
   // -----------------------------------------------------------------
+  // Cupón de descuento (opcional). Aplica SOLO sobre el subtotal de
+  // productos — el envío se cobra aparte. Se valida aquí SIN consumir;
+  // el consumo atómico ocurre tras insertar la orden, para que un cupón
+  // ya usado no se queme en una creación fallida.
+  // -----------------------------------------------------------------
+  let cuponId = null;
+  let descuentoCupon = 0;
+  if (codigo_cupon) {
+    const codigo = String(codigo_cupon).trim().toUpperCase();
+    const { cupon, error } = await buscarCuponValido(codigo);
+    if (error || !cupon) {
+      throw new ErrorOrden(400, error || 'Cupón inválido');
+    }
+    cuponId = cupon.id;
+    descuentoCupon = calcularDescuento(cupon, total_usd);
+  }
+  const totalFinal = Math.round((total_usd - descuentoCupon) * 100) / 100;
+
+  // -----------------------------------------------------------------
   // Validación de crédito: NUNCA confiar en lo que mande el frontend.
   // Si el cliente pidió 'credito', recalculamos su saldo disponible
   // (linea_credito - deuda_actual) server-side antes de aceptarlo.
@@ -256,7 +276,7 @@ export async function construirOrden(usuario_id, datos, opciones = {}) {
     const deuda_actual = total_facturado - total_pagado;
     const saldo_disponible = Number(cliente.linea_credito) - deuda_actual;
 
-    if (saldo_disponible >= total_usd) {
+    if (saldo_disponible >= totalFinal) {
       forma_pago_final = 'credito';
     }
     // Si no alcanza el saldo, forma_pago_final se queda en 'contado'
@@ -271,7 +291,7 @@ export async function construirOrden(usuario_id, datos, opciones = {}) {
   const nuevaOrden = {
     usuario_id,
     estado: 'pedido_creado',
-    total_usd,
+    total_usd: totalFinal,
     forma_pago: forma_pago_final
   };
   if (tipo_envio) nuevaOrden.tipo_envio = tipo_envio;
@@ -289,6 +309,18 @@ export async function construirOrden(usuario_id, datos, opciones = {}) {
 
   if (errorOrden) throw errorOrden;
 
+  if (cuponId) {
+    const { consumido, error: errorConsumo } = await consumirCupon(cuponId, usuario_id, orden.id);
+    if (errorConsumo) {
+      await supabase.from('ordenes').delete().eq('id', orden.id);
+      throw errorConsumo;
+    }
+    if (!consumido) {
+      await supabase.from('ordenes').delete().eq('id', orden.id);
+      throw new ErrorOrden(409, 'Este cupón ya fue utilizado');
+    }
+  }
+
   const itemsParaInsertar = itemsConPrecio.map(item => ({
     ...item,
     orden_id: orden.id
@@ -300,6 +332,7 @@ export async function construirOrden(usuario_id, datos, opciones = {}) {
 
   if (errorItems) {
     await supabase.from('ordenes').delete().eq('id', orden.id);
+    if (cuponId) await liberarCupon(cuponId);
     throw errorItems;
   }
 
@@ -310,8 +343,8 @@ export async function construirOrden(usuario_id, datos, opciones = {}) {
   });
 
   const mensajeCreacion = forma_pago_final === 'credito'
-    ? `Tu orden #${orden.id} por $${total_usd} fue recibida. Te avisaremos si hay algún ajuste en las cantidades.`
-    : `Tu orden #${orden.id} por $${total_usd} fue recibida. Te avisaremos cuando esté lista para procesar el pago.`;
+    ? `Tu orden #${orden.id} por $${totalFinal} fue recibida. Te avisaremos si hay algún ajuste en las cantidades.`
+    : `Tu orden #${orden.id} por $${totalFinal} fue recibida. Te avisaremos cuando esté lista para procesar el pago.`;
 
   await crearNotificacion(
     usuario_id,
@@ -321,7 +354,12 @@ export async function construirOrden(usuario_id, datos, opciones = {}) {
     orden.id
   );
 
-  return { ...orden, items: itemsConPrecio };
+  return {
+    ...orden,
+    items: itemsConPrecio,
+    descuento_cupon: descuentoCupon,
+    cupon_codigo: cuponId ? String(codigo_cupon).trim().toUpperCase() : null,
+  };
 }
 
 // GET /orders

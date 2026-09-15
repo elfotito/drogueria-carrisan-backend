@@ -257,6 +257,7 @@ export async function crearOrdenParaCliente(req, res) {
       items, forma_pago, tipo_envio,
       direccion_envio_id, agencia_envio,
       agencia_envio_id: req.body.agencia_envio_id,
+      codigo_cupon: req.body.codigo_cupon || null,
     };
     if (bodyEnvio.agencia_envio_id) {
       const { data: agencia } = await supabase
