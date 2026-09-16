@@ -194,8 +194,27 @@ export async function getColaDespacho(req, res) {
 
     if (error) throw error;
 
-    res.json((data || []).map(o => ({
+    const ordenes = data || [];
+
+    // Horario de recepción por usuario (cliente institucional): se trae en
+    // un segundo query por lotes con los ids de la cola. El horario vive en
+    // perfiles_institucional y es tan crítico como la dirección para el despacho.
+    const ids = [...new Set(ordenes.map((o) => o.users?.id).filter(Boolean))];
+    let horariosPorUsuario = {};
+    if (ids.length > 0) {
+      const { data: perfiles, error: errPerfiles } = await supabase
+        .from('perfiles_institucional')
+        .select('user_id, horario_recepcion')
+        .in('user_id', ids);
+
+      if (errPerfiles) throw errPerfiles;
+
+      for (const p of perfiles || []) horariosPorUsuario[p.user_id] = p.horario_recepcion;
+    }
+
+    res.json(ordenes.map(o => ({
       ...o,
+      horario_recepcion: o.users?.id ? horariosPorUsuario[o.users.id] || null : null,
       ordenes_items: Array.isArray(o.ordenes_items) ? o.ordenes_items : []
     })));
   } catch (err) {
