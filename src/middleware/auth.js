@@ -44,3 +44,35 @@ export function verifyAdmin(req, res, next) {
   }
   next();
 }
+
+/**
+ * Igual que verifyJWT pero NO bloquea: si el token es válido adjunta
+ * req.user (con etiqueta fresca desde la BD) y sigue; si no hay token,
+ * es inválido o el usuario está revocado/desactivado, sigue como anónimo.
+ * Úsalo en rutas públicas que personalizan por sesión (ej. /products).
+ */
+export async function verifyJWTOptional(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return next();
+
+  const token = authHeader.split(' ')[1];
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('token_version, activo, etiqueta')
+      .eq('id', decoded.id)
+      .single();
+
+    if (error || !user || !user.activo || user.token_version !== decoded.token_version) {
+      return next();
+    }
+
+    req.user = { ...decoded, etiqueta: user.etiqueta };
+    next();
+  } catch (error) {
+    next();
+  }
+}

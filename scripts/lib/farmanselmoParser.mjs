@@ -18,6 +18,10 @@ export function esComboNombreFarmanselmo(nombre) {
   if (/([a-z0-9])+\s*\+\s*([a-z0-9])/i.test(s)) return true;
   if (/(?:^|[^a-z])hct(?:[^a-z]|$)/i.test(s)) return true;
   // ACEBROFILINA = segundo principio activo de un combo sin marcador "+"
+  // (ej. "AMBROXOL ACEBROFILINA JARABE"): una foto de combo NO pega a un
+  // producto de una sola molécula.
+  if (/(?:^|[^a-z])acebrofilina(?:[^a-z]|$)/i.test(s)) return true;
+  // ACEBROFILINA = segundo principio activo de un combo sin marcador "+"
   // (p.ej. "AMBROXOL ACEBROFILINA JARABE"): una foto de combo NO pega a un producto mono.
   if (/(?:^|[^a-z])acebrofilina(?:[^a-z]|$)/i.test(s)) return true;
   // "beclometasona" suele venir con "+" (VENTODUO SALBUTAMOL+BECLOMETASONA), pero el

@@ -9,14 +9,16 @@ import {
   preciosBulkUpdate
 } from '../controllers/productos.controller.js';
 import { getEstadoAlerta, suscribirseAlerta, cancelarAlerta } from '../controllers/alertasDisponibilidad.controller.js';
-import { verifyJWT, verifyAdmin } from '../middleware/auth.js';
+import { verifyJWT, verifyAdmin, verifyJWTOptional } from '../middleware/auth.js';
 
 const router = Router();
 
-router.get('/', getProductos);
+// Rutas públicas pero personalizan el precio por la etiqueta del cliente
+// si la petición trae un JWT válido (verifyJWTOptional no bloquea).
+router.get('/', verifyJWTOptional, getProductos);
 router.get('/metadata', getProductosMetadata);
 router.get('/stats', verifyJWT, verifyAdmin, getProductosStats);
-router.get('/:id', getProductoById);
+router.get('/:id', verifyJWTOptional, getProductoById);
 router.post('/', verifyJWT, verifyAdmin, createProducto);
 router.post('/precios-bulk', verifyJWT, verifyAdmin, preciosBulkUpdate);
 router.patch('/:id', verifyJWT, verifyAdmin, updateProducto);

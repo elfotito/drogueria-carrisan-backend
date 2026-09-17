@@ -38,6 +38,16 @@ async function calcularDeudasPorUsuarioIds(ids) {
   return deudas;
 }
 
+// Etiquetas de precio activas (etiqueta + porcentaje) para los selectores.
+async function listarEtiquetasDisponibles() {
+  const { data } = await supabase
+    .from('etiquetas_precio')
+    .select('etiqueta, porcentaje')
+    .eq('activo', true)
+    .order('etiqueta', { ascending: true });
+  return data || [];
+}
+
 // -----------------------------------------------------------------
 // GET /staff/clientes?buscar=&tipo=&etiqueta=&pagina=&por_pagina=
 //
@@ -94,7 +104,8 @@ export async function listarClientes(req, res) {
     });
 
     const totalPaginas = Math.max(1, Math.ceil((count || 0) / porPagina));
-    res.json({ clientes, total: count || 0, pagina, por_pagina: porPagina, total_paginas: totalPaginas });
+    const etiquetas = await listarEtiquetasDisponibles();
+    res.json({ clientes, total: count || 0, pagina, por_pagina: porPagina, total_paginas: totalPaginas, etiquetas });
   } catch (err) {
     console.error('Error al listar clientes:', err);
     res.status(500).json({ error: 'Error del servidor' });
@@ -150,9 +161,54 @@ export async function getClienteDetalle(req, res) {
       credito_bloqueado_motivo: user.credito_bloqueado_motivo || null,
     };
 
-    res.json({ cliente: { ...user, linea_credito: undefined, credito_bloqueado: undefined, credito_bloqueado_motivo: undefined }, perfil, credito });
+    res.json({ cliente: { ...user, linea_credito: undefined, credito_bloqueado: undefined, credito_bloqueado_motivo: undefined }, perfil, credito, etiquetas: await listarEtiquetasDisponibles() });
   } catch (err) {
     console.error('Error al obtener detalle de cliente:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
+// -----------------------------------------------------------------
+// PATCH /staff/clientes/:id
+//
+// Asigna la etiqueta de precio del cliente (etiqueta fija por cliente).
+// Valida contra etiquetas_precio activas; un string vacío la limpia.
+// -----------------------------------------------------------------
+export async function updateClienteEtiqueta(req, res) {
+  const usuario_id = Number(req.params.id);
+  const { etiqueta } = req.body || {};
+
+  try {
+    if (typeof etiqueta !== 'string') {
+      return res.status(400).json({ error: 'etiqueta es requerida' });
+    }
+
+    const etiquetaFinal = etiqueta.trim();
+
+    if (etiquetaFinal) {
+      const { data: etq, error: errEtq } = await supabase
+        .from('etiquetas_precio')
+        .select('etiqueta')
+        .eq('etiqueta', etiquetaFinal)
+        .eq('activo', true)
+        .maybeSingle();
+      if (errEtq) throw errEtq;
+      if (!etq) return res.status(400).json({ error: 'Etiqueta no válida o inactiva' });
+    }
+
+    const { data: user, error } = await supabase
+      .from('users')
+      .update({ etiqueta: etiquetaFinal || null })
+      .eq('id', usuario_id)
+      .select('id, nombre, etiqueta')
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!user) return res.status(404).json({ error: 'Cliente no encontrado' });
+
+    res.json({ cliente: user, etiquetas: await listarEtiquetasDisponibles() });
+  } catch (err) {
+    console.error('Error al actualizar etiqueta del cliente:', err);
     res.status(500).json({ error: 'Error del servidor' });
   }
 }

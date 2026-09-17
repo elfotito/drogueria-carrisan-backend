@@ -1,5 +1,12 @@
 import { supabase } from '../config/supabase.js';
-import { aplicarDescuentosAProductos, aplicarDescuentoAProducto } from './descuentos.controller.js';
+import {
+  aplicarDescuentosAProductos,
+  aplicarDescuentoAProducto,
+  aplicarPrecioCliente,
+  getPorcentajeEtiqueta,
+  getDescuentosVigentes,
+  resolverPrecioCliente,
+} from './descuentos.controller.js';
 import { notificarDisponibles } from './alertasDisponibilidad.controller.js';
 
 // Slugs cortos → valor real de `productos.linea` en la BD (la columna guarda
@@ -43,6 +50,24 @@ export async function enriquecerConValoraciones(productos) {
       rating_total: r ? r.count : 0,
     };
   });
+}
+
+// Aplica etiqueta + promos a una lista de productos. Sin etiqueta (o con
+// etiqueta sin porcentaje) se queda en base + promos, como siempre.
+async function enriquecerPrecios(productos, etiqueta) {
+  if (!etiqueta) return aplicarDescuentosAProductos(productos);
+  const pct = await getPorcentajeEtiqueta(etiqueta);
+  if (!pct) return aplicarDescuentosAProductos(productos);
+  return aplicarPrecioCliente(productos, pct);
+}
+
+// Igual que enriquecerPrecios pero para un solo producto (detalle).
+async function enriquecerPrecioProducto(producto, etiqueta) {
+  if (!etiqueta) return aplicarDescuentoAProducto(producto);
+  const pct = await getPorcentajeEtiqueta(etiqueta);
+  if (!pct) return aplicarDescuentoAProducto(producto);
+  const vigentes = await getDescuentosVigentes();
+  return resolverPrecioCliente(producto, pct, vigentes);
 }
 
 // GET /products?search=&marca_id=&sort=&molecula=&categoria=&linea=&laboratorio=&forma=&disponible=&sin_precio=&precio_min=&precio_max=&page=&limit=
@@ -152,7 +177,7 @@ export async function getProductos(req, res) {
 
     if (error) throw error;
 
-    const productosConDescuento = await aplicarDescuentosAProductos(data);
+    const productosConDescuento = await enriquecerPrecios(data, req.user?.etiqueta);
     const productosConRating = usarPaginacion
       ? productosConDescuento
       : await enriquecerConValoraciones(productosConDescuento);
@@ -262,8 +287,8 @@ export async function getProductoById(req, res) {
       return res.status(404).json({ error: 'Producto no encontrado' });
     }
 
-    // 👇 único agregado
-    const productoConDescuento = await aplicarDescuentoAProducto(data);
+    // Precio con etiqueta del cliente si trae sesión (silencioso) + promos encima
+    const productoConDescuento = await enriquecerPrecioProducto(data, req.user?.etiqueta);
 
     // Enriquecer con rating_promedio y rating_total
     const [productoConRating] = await enriquecerConValoraciones([productoConDescuento]);

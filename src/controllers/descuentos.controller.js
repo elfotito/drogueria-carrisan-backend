@@ -114,6 +114,70 @@ export async function aplicarDescuentoAProducto(producto) {
 }
 
 // ===================================================================
+// Precios por etiqueta de cliente
+// ===================================================================
+// La etiqueta es FIJA por cliente (la asigna el staff en Comercial → Clientes).
+// Convención de signo (ver migración 037): porcentaje > 0 = DESCUENTO,
+// porcentaje < 0 = recargo. La etiqueta es SILENCIOSA: no genera tachado
+// (precio_original_usd) por sí sola; solo las promos encima lo muestran.
+
+/**
+ * Ajusta un precio base por el porcentaje de la etiqueta del cliente.
+ * Función pura. Devuelve null si no hay precio base.
+ */
+export function precioConEtiqueta(precioBase, porcentajeEtiqueta) {
+  if (precioBase == null) return null
+  const base = Number(precioBase)
+  if (Number.isNaN(base)) return null
+  const pct = Number(porcentajeEtiqueta) || 0
+  const precio = base * (1 - pct / 100)
+  return Math.round(Math.max(0, precio) * 100) / 100
+}
+
+/**
+ * Devuelve el porcentaje activo de una etiqueta (0 si no existe / está inactiva).
+ */
+export async function getPorcentajeEtiqueta(etiqueta) {
+  if (!etiqueta) return 0
+  const { data, error } = await supabase
+    .from('etiquetas_precio')
+    .select('porcentaje')
+    .eq('etiqueta', etiqueta)
+    .eq('activo', true)
+    .maybeSingle()
+  if (error || !data) return 0
+  const pct = Number(data.porcentaje)
+  return Number.isNaN(pct) ? 0 : pct
+}
+
+/**
+ * Dado un producto, el porcentaje de etiqueta del cliente y los descuentos
+ * vigentes (ya cargados), devuelve el producto con la cadena completa aplicada:
+ *   1. etiqueta → precio_etiqueta = round(precio_usd * (1 - pct/100), 2)   (silenciosa)
+ *   2. promo   → resolverPrecioProducto sobre el precio con etiqueta
+ * El tachado (precio_original_usd) refleja el precio con etiqueta SOLO si hay promo.
+ */
+export function resolverPrecioCliente(producto, porcentajeEtiqueta, descuentosVigentes) {
+  if (producto.precio_usd == null) {
+    return { ...producto, precio_original_usd: null, descuento_activo: null }
+  }
+  const precioEtiqueta = precioConEtiqueta(producto.precio_usd, porcentajeEtiqueta)
+  return resolverPrecioProducto(
+    { ...producto, precio_usd: precioEtiqueta },
+    descuentosVigentes
+  )
+}
+
+/**
+ * Aplica etiqueta + promos a un array de productos en un solo paso.
+ * Úsalo en getProductos (listado) para clientes con sesión.
+ */
+export async function aplicarPrecioCliente(productos, porcentajeEtiqueta) {
+  const vigentes = await getDescuentosVigentes()
+  return productos.map(p => resolverPrecioCliente(p, porcentajeEtiqueta, vigentes))
+}
+
+// ===================================================================
 // Endpoints CRUD (admin)
 // ===================================================================
 

@@ -20,6 +20,7 @@ import {
   getOrdenesDeCliente,
   getCotizacionesDeCliente,
   getRequerimientosDeCliente,
+  updateClienteEtiqueta,
 } from '../controllers/staff.clientes.controller.js';
 import { listarProductosStaff } from '../controllers/staff.productos.controller.js';
 import { verifyStaffJWT, checkRolStaff } from '../middleware/staffAuth.js';
@@ -35,6 +36,7 @@ router.post('/login', loginStaff);
 router.get('/despacho', verifyStaffJWT, checkRolStaff(ROLES_DESPACHO), getColaDespacho);
 router.patch('/despacho/:id/entregar', verifyStaffJWT, checkRolStaff(ROLES_DESPACHO), marcarEntregado);
 router.get('/clientes', verifyStaffJWT, checkRolStaff(ROLES_VENTAS), listarClientes);
+router.patch('/clientes/:id', verifyStaffJWT, checkRolStaff(ROLES_VENTAS), updateClienteEtiqueta);
 router.get('/productos', verifyStaffJWT, checkRolStaff(ROLES_VENTAS), listarProductosStaff);
 router.get('/clientes/:id/detalle', verifyStaffJWT, checkRolStaff(ROLES_VENTAS), getClienteDetalle);
 router.get('/clientes/:id/ordenes', verifyStaffJWT, checkRolStaff(ROLES_VENTAS), getOrdenesDeCliente);

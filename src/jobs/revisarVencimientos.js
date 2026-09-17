@@ -15,7 +15,7 @@ import { crearNotificacion } from '../controllers/notificaciones.controller.js';
 // ---------------------------------------------------------------
 
 const DIAS_AVISO_PREVIO = 3;
-const DIAS_BLOQUEO_AUTO = 60;
+const DIAS_BLOQUEO_AUTO = 20;
 
 export async function revisarVencimientos() {
   console.log('⏰ Revisando órdenes vencidas…');

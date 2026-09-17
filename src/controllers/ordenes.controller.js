@@ -1,6 +1,7 @@
 import { supabase } from '../config/supabase.js';
 import { crearNotificacion } from './notificaciones.controller.js';
 import { buscarCuponValido, calcularDescuento, consumirCupon, liberarCupon } from './cupones.controller.js';
+import { getDescuentosVigentes, getPorcentajeEtiqueta, resolverPrecioCliente } from './descuentos.controller.js';
 
 // ---------------------------------------------------------
 // Pipeline de estados de una orden. REGLA CENTRAL (ver AGENTS.md):
@@ -188,7 +189,7 @@ export async function construirOrden(usuario_id, datos, opciones = {}) {
   const productoIds = items.map(item => item.producto_id);
   const { data: productos, error: errorProductos } = await supabase
     .from('productos')
-    .select('id, precio_usd, disponible')
+    .select('id, precio_usd, disponible, marca_id, laboratorio, molecula, linea, forma')
     .in('id', productoIds);
 
   if (errorProductos) throw errorProductos;
@@ -206,15 +207,31 @@ export async function construirOrden(usuario_id, datos, opciones = {}) {
     }
   }
 
+  // Etiqueta del cliente (siempre, no solo crédito): precio con etiqueta +
+  // promos encima. La construcción del total DEBE reflejar lo que el cliente
+  // ve en el catálogo, no el precio base. Se aprovecha el mismo fetch para el
+  // bloque de crédito (linea_credito / credito_bloqueado).
+  const { data: usuario, error: errorUsuario } = await supabase
+    .from('users')
+    .select('etiqueta, linea_credito, credito_bloqueado')
+    .eq('id', usuario_id)
+    .single();
+  if (errorUsuario || !usuario) throw errorUsuario || new ErrorOrden(404, 'Usuario no encontrado');
+
+  const porcentajeEtiqueta = await getPorcentajeEtiqueta(usuario.etiqueta);
+  const descuentosVigentes = await getDescuentosVigentes();
+
   let total_usd = 0;
   const itemsConPrecio = items.map(item => {
     const producto = productos.find(p => p.id === item.producto_id);
-    const subtotal = producto.precio_usd * item.cantidad;
+    const resuelto = resolverPrecioCliente(producto, porcentajeEtiqueta, descuentosVigentes);
+    const precioUnitario = resuelto.precio_usd;
+    const subtotal = precioUnitario * item.cantidad;
     total_usd += subtotal;
     return {
       producto_id: item.producto_id,
       cantidad: item.cantidad,
-      precio_unitario: producto.precio_usd
+      precio_unitario: precioUnitario
     };
   });
 
@@ -244,13 +261,7 @@ export async function construirOrden(usuario_id, datos, opciones = {}) {
   // -----------------------------------------------------------------
   let forma_pago_final = 'contado';
   if (formaPagoSolicitada === 'credito') {
-    const { data: cliente, error: errorCliente } = await supabase
-      .from('users')
-      .select('linea_credito, credito_bloqueado')
-      .eq('id', usuario_id)
-      .single();
-
-    if (errorCliente || !cliente) throw errorCliente || new ErrorOrden(404, 'Usuario no encontrado');
+    const cliente = usuario;
 
     // Bloqueo de crédito: si el cliente tiene credito_bloqueado, rechazar.
     if (cliente.credito_bloqueado) {
