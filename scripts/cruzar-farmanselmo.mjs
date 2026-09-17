@@ -1,13 +1,14 @@
 // scripts/cruzar-farmanselmo.mjs
 // Cruce farmanselmo_limpio.csv contra productos activos SIN foto de la BD.
-// Reutiliza cobecaParser (parseo de descripcion + matching difuso).
+// Matcher adaptado: ancla por MOLECULA estricta + forma completa + dosis.
 // DRY-RUN por defecto: genera data/farmanselmo_cruce.csv de candidatos sin tocar BD.
 // Con --apply: actualiza foto_url en productos (solo mejor score por producto, umbral alto).
 
 import pg from 'pg';
 import fs from 'fs';
 import { config } from 'dotenv';
-import { parsearDescripcion, matchScore, tieneAncla, construirIndice, candidatosPara } from './lib/cobecaParser.mjs';
+import { construirIndice, candidatosPara } from './lib/cobecaParser.mjs';
+import { scoreFarmanselmo, componentesMolecula } from './lib/farmanselmoParser.mjs';
 
 config();
 
@@ -64,6 +65,16 @@ async function main() {
   const idxSlug = header.indexOf('categoria_slug');
   if ([idxN, idxImg, idxPrecio, idxId].some((i) => i === -1)) throw new Error('Faltan columnas esperadas');
 
+  // Filas farmanselmo con imagen real
+  const farmConImagen = datos.filter((f) => {
+    const img = (f[idxImg] || '').trim();
+    return img && !img.includes(PLACEHOLDER);
+  });
+  console.log(`Filas farmanselmo con imagen util: ${farmConImagen.length}`);
+
+  // Índice: cada fila farmanselmo indexada por sus tokens (como producto con nombre_comercial)
+  const idxFarm = construirIndice(farmConImagen.map((f, i) => ({ id: i, nombre_comercial: f[idxN], molecula: '' })));
+
   const client = new pg.Client(DB_CONFIG);
   await client.connect();
 
@@ -75,46 +86,40 @@ async function main() {
   );
   console.log(`Productos activos SIN foto: ${productos.length}`);
 
-  const idx = construirIndice(productos);
   const mejores = new Map(); // producto_id -> { score, farm, fotoUrl }
-  let conImagen = 0;
-  let sinImagenUtil = 0;
-  let sinFormaDetectada = 0;
+  let anclaInvalida = 0;
+  let sinCandidatos = 0;
+  let evaluados = 0;
 
-  for (const f of datos) {
-    const nombre = (f[idxN] || '').trim();
-    const imagen = (f[idxImg] || '').trim();
-    if (!imagen || imagen.includes(PLACEHOLDER)) { sinImagenUtil++; continue; }
-    conImagen++;
+  for (const p of productos) {
+    const componentes = componentesMolecula(p.molecula);
+    if (componentes.length === 0) { anclaInvalida++; continue; }
+    const pseudoParsed = { molTokens: componentes.flat() };
+    const cands = candidatosPara(pseudoParsed, idxFarm);
+    if (cands.length === 0) { sinCandidatos++; continue; }
 
-    const parsed = parsearDescripcion(nombre);
-    parsed._raw = nombre;
-    if (!parsed.forma) { sinFormaDetectada++; continue; }
-
-    const candidatos = candidatosPara(parsed, idx);
     let best = null;
     let bestScore = UMBRAL;
-    for (const p of candidatos) {
-      const s = matchScore(parsed, p);
-      if (s > bestScore && tieneAncla(parsed, p)) { bestScore = s; best = p; }
+    for (const c of cands) {
+      const farmRow = farmConImagen[c.id];
+      const s = scoreFarmanselmo(farmRow[idxN], p);
+      evaluados++;
+      if (s > bestScore) { bestScore = s; best = farmRow; }
     }
     if (best) {
-      const actual = mejores.get(best.id);
-      if (!actual || bestScore > actual.score) {
-        mejores.set(best.id, { score: bestScore, nombre, fotoUrl: imagen, precioBs: f[idxPrecio], farmanselmoId: f[idxId], slug: f[idxSlug] });
-      }
+      mejores.set(p.id, { score: bestScore, nombre: best[idxN], fotoUrl: best[idxImg], precioBs: best[idxPrecio], farmanselmoId: best[idxId], slug: best[idxSlug] });
     }
   }
 
   const res = [...mejores.entries()].sort((a, b) => b[1].score - a[1].score);
-  const aplicables = res.filter(([, v]) => v.score >= UMBRAL);
-  console.log(`Filas farmanselmo con imagen util: ${conImagen}`);
-  console.log(`  - sin forma detectada (no matcheables por forma): ${sinFormaDetectada}`);
-  console.log(`  - sin imagen real (placeholder): ${sinImagenUtil}`);
-  console.log(`Productos SIN foto con match >= ${UMBRAL}: ${aplicables.length}`);
-  console.log(`  - arriba de 0.85: ${aplicables.filter(([, v]) => v.score >= 0.85).length}`);
-  console.log(`  - 0.70-0.85   : ${aplicables.filter(([, v]) => v.score >= 0.70 && v.score < 0.85).length}`);
-  console.log(`  - 0.60-0.70   : ${aplicables.filter(([, v]) => v.score >= UMBRAL && v.score < 0.70).length}`);
+  console.log(`Productos SIN foto que encontraron match >= ${UMBRAL}: ${res.length}`);
+  console.log(`  - arriba de 0.85: ${res.filter(([, v]) => v.score >= 0.85).length}`);
+  console.log(`  - 0.75-0.85   : ${res.filter(([, v]) => v.score >= 0.75 && v.score < 0.85).length}`);
+  console.log(`  - 0.65-0.75   : ${res.filter(([, v]) => v.score >= 0.65 && v.score < 0.75).length}`);
+  console.log(`  - 0.60-0.65   : ${res.filter(([, v]) => v.score >= UMBRAL && v.score < 0.65).length}`);
+  console.log(`Sin ancla (sin molecula en BD): ${anclaInvalida}`);
+  console.log(`Sin candidatos en farmanselmo: ${sinCandidatos}`);
+  console.log(`Evaluaciones de score: ${evaluados}`);
 
   // Reporte CSV
   const esc = (v) => {
@@ -123,7 +128,7 @@ async function main() {
     return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   };
   const headerOut = 'producto_id,sku,nombre_comercial,molecula,forma,laboratorio,costo_usd,precio_usd,score,nombre_farmanselmo,precio_bs,imagen,farmanselmo_id,categoria_slug';
-  const lines = aplicables.map(([pid, v]) => {
+  const lines = res.map(([pid, v]) => {
     const p = productos.find((x) => x.id === pid);
     return [pid, p?.sku, p?.nombre_comercial, p?.molecula, p?.forma, p?.laboratorio,
       p?.costo_usd, p?.precio_usd, v.score.toFixed(3), v.nombre, v.precioBs, v.fotoUrl, v.farmanselmoId, v.slug].map(esc).join(',');
@@ -138,8 +143,8 @@ async function main() {
       FROM (SELECT unnest($1::int[]) AS id, unnest($2::text[]) AS url) AS v
       WHERE p.id = v.id
     `;
-    const ids = aplicables.map(([pid]) => pid);
-    const urls = aplicables.map(([, v]) => v.fotoUrl);
+    const ids = res.map(([pid]) => pid);
+    const urls = res.map(([, v]) => v.fotoUrl);
     const CHUNK = 200;
     let total = 0;
     for (let i = 0; i < ids.length; i += CHUNK) {

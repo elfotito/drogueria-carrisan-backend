@@ -325,6 +325,7 @@ export async function register(req, res) {
         especialidad: perfil.especialidad || null,
         rif: perfil.rif,
         rif_archivo_url: perfil.rif_archivo_url || null,
+        cedula_archivo_url: perfil.cedula_archivo_url || null,
         certificado_acreditacion_url: perfil.certificado_acreditacion_url || null,
         direccion_fiscal: perfil.direccion_fiscal || null
       });

@@ -56,6 +56,17 @@ export async function subirComprobante(req, res) {
 
 const TIPOS_PERMITIDOS_REGISTRO = ['application/pdf'];
 
+// La cédula de identidad puede llegar como PDF o como foto (JPG/PNG/WEBP);
+// el resto de documentos del registro sigue siendo solo PDF.
+const DOCS_CON_IMAGEN = ['cedula_identidad'];
+const TIPOS_PERMITIDOS_CON_IMAGEN = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
+const EXTENSIONES_POR_MIME = {
+  'application/pdf': 'pdf',
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+};
+
 // POST /uploads/registro (público, multipart/form-data, campo "archivo")
 // Sin verifyJWT: durante el registro el usuario todavía no tiene cuenta
 // ni token. Protegido por rate limiting general de /uploads + validación
@@ -72,8 +83,15 @@ export async function subirArchivoRegistro(req, res) {
   if (!archivo) {
     return res.status(400).json({ error: 'No se recibió ningún archivo' });
   }
-  if (!TIPOS_PERMITIDOS_REGISTRO.includes(archivo.mimetype)) {
-    return res.status(400).json({ error: 'Formato no permitido. Solo se aceptan PDF.' });
+  const aceptaImagenes = DOCS_CON_IMAGEN.includes(tipo_documento);
+  const tiposPermitidos = aceptaImagenes ? TIPOS_PERMITIDOS_CON_IMAGEN : TIPOS_PERMITIDOS_REGISTRO;
+
+  if (!tiposPermitidos.includes(archivo.mimetype)) {
+    return res.status(400).json({
+      error: aceptaImagenes
+        ? 'Formato no permitido. Usa PDF o imagen (JPG, PNG, WEBP).'
+        : 'Formato no permitido. Solo se aceptan PDF.'
+    });
   }
   if (archivo.size > TAMANO_MAXIMO_BYTES) {
     return res.status(400).json({ error: 'El archivo supera el tamaño máximo de 2MB' });
@@ -83,12 +101,13 @@ export async function subirArchivoRegistro(req, res) {
     const timestamp = Date.now();
     const random = Math.random().toString(36).substring(2, 8);
     const etiquetaDocumento = tipo_documento || 'documento';
-    const nombreArchivo = `registro/${etiquetaDocumento}_${timestamp}-${random}.pdf`;
+    const extension = EXTENSIONES_POR_MIME[archivo.mimetype] || 'pdf';
+    const nombreArchivo = `registro/${etiquetaDocumento}_${timestamp}-${random}.${extension}`;
 
     const { error } = await supabase.storage
       .from(BUCKET)
       .upload(nombreArchivo, archivo.buffer, {
-        contentType: 'application/pdf',
+        contentType: archivo.mimetype,
         upsert: false,
       });
 
