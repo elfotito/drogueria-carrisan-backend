@@ -1,5 +1,6 @@
 node_modules/
 .env
+src/migrations/
 obtener-refresh-token.js
 scraper-inhrr.mjs
 poblar-vademecum.js
