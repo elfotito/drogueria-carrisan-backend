@@ -226,7 +226,17 @@ export async function getProductosMetadata(req, res) {
     const laboratorios = [...new Set((data || []).map((p) => p.laboratorio).filter(Boolean))].sort();
     const formas = [...new Set((data || []).map((p) => p.forma).filter(Boolean))].sort();
 
-    res.json({ laboratorios, formas, categorias });
+    // Top laboratorios por cantidad de productos activos (para el carrusel de la home).
+    const conteo = (data || []).reduce((acc, p) => {
+      if (p.laboratorio) acc[p.laboratorio] = (acc[p.laboratorio] || 0) + 1;
+      return acc;
+    }, {});
+    const laboratoriosTop = Object.entries(conteo)
+      .map(([nombre, total]) => ({ nombre, total }))
+      .sort((a, b) => b.total - a.total || a.nombre.localeCompare(b.nombre))
+      .slice(0, 15);
+
+    res.json({ laboratorios, formas, categorias, laboratoriosTop });
   } catch (err) {
     console.error('Error al obtener metadata de productos:', err);
     res.status(500).json({ error: 'Error del servidor' });
