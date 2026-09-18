@@ -198,13 +198,22 @@ export async function getProductos(req, res) {
   }
 }
 
-// GET /products/metadata — valores distintos de laboratorio/forma y categorías de la tienda
+// GET /products/metadata?disponibles=true — valores distintos de laboratorio/forma y
+// categorías de la tienda. `disponibles=true` (solo catálogo de la tienda) restringe
+// laboratorios/formas a productos comprables (disponible=true). Admin/staff NO lo
+// envían: necesitan ver también los laboratorios con productos "consultar precio".
 export async function getProductosMetadata(req, res) {
   try {
-    const { data, error } = await supabase
+    let query = supabase
       .from('productos')
       .select('laboratorio, forma')
       .eq('activo', true);
+
+    if (req.query.disponibles === 'true') {
+      query = query.eq('disponible', true);
+    }
+
+    const { data, error } = await query;
 
     if (error) throw error;
 
