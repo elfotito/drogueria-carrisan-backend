@@ -204,18 +204,31 @@ export async function getProductos(req, res) {
 // envían: necesitan ver también los laboratorios con productos "consultar precio".
 export async function getProductosMetadata(req, res) {
   try {
-    let query = supabase
-      .from('productos')
-      .select('laboratorio, forma')
-      .eq('activo', true);
+    const TAMANIO_PAGINA = 1000;
+    const filas = [];
+    let desde = 0;
 
-    if (req.query.disponibles === 'true') {
-      query = query.eq('disponible', true);
+    // PostgREST devuelve como máximo 1000 filas por request → se pagina para
+    // que `laboratorios`/`laboratoriosTop` reflejen TODO el catálogo (no solo
+    // el primer "chunk"). Sin esto el top del carrusel sale truncado.
+    while (true) {
+      let query = supabase
+        .from('productos')
+        .select('laboratorio, forma')
+        .eq('activo', true)
+        .range(desde, desde + TAMANIO_PAGINA - 1);
+
+      if (req.query.disponibles === 'true') {
+        query = query.eq('disponible', true);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      filas.push(...(data || []));
+      if (!data || data.length < TAMANIO_PAGINA) break;
+      desde += TAMANIO_PAGINA;
     }
-
-    const { data, error } = await query;
-
-    if (error) throw error;
 
     const { data: categorias, error: errorCategorias } = await supabase
       .from('categorias_tienda')
@@ -223,11 +236,11 @@ export async function getProductosMetadata(req, res) {
       .order('orden');
     if (errorCategorias) throw errorCategorias;
 
-    const laboratorios = [...new Set((data || []).map((p) => p.laboratorio).filter(Boolean))].sort();
-    const formas = [...new Set((data || []).map((p) => p.forma).filter(Boolean))].sort();
+    const laboratorios = [...new Set(filas.map((p) => p.laboratorio).filter(Boolean))].sort();
+    const formas = [...new Set(filas.map((p) => p.forma).filter(Boolean))].sort();
 
     // Top laboratorios por cantidad de productos activos (para el carrusel de la home).
-    const conteo = (data || []).reduce((acc, p) => {
+    const conteo = filas.reduce((acc, p) => {
       if (p.laboratorio) acc[p.laboratorio] = (acc[p.laboratorio] || 0) + 1;
       return acc;
     }, {});
