@@ -1,1 +1,6 @@
-export const YOUTUBE_CHANNEL_ID = process.env.YOUTUBE_CHANNEL_ID || '';
+export const YOUTUBE_CHANNEL_IDS = (
+  process.env.YOUTUBE_CHANNEL_IDS || process.env.YOUTUBE_CHANNEL_ID || ''
+)
+  .split(',')
+  .map((id) => id.trim())
+  .filter(Boolean);
