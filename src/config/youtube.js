@@ -1,0 +1,1 @@
+export const YOUTUBE_CHANNEL_ID = process.env.YOUTUBE_CHANNEL_ID || '';

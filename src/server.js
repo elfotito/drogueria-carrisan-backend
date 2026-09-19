@@ -53,6 +53,7 @@ import staffChatRoutes from './routes/staff.chat.routes.js';
 import staffCuponesRoutes from './routes/staff.cupones.routes.js';
 import cuponesRoutes from './routes/cupones.routes.js';
 import noticiasRoutes from './routes/noticias.routes.js';
+import shortsRoutes from './routes/shorts.routes.js';
 import cron from 'node-cron';
 import { actualizarTasa } from './jobs/actualizarTasa.js';
 
@@ -87,6 +88,7 @@ app.get('/health', (req, res) => {
 app.use('/auth', authRoutes);
 app.use('/marcas', marcasRoutes);
 app.use('/products', productosRoutes);
+app.use('/shorts', shortsRoutes);
 app.use('/prices', preciosRoutes);
 app.use('/orders', ordenesRoutes);
 app.use('/users', usersRoutes);
