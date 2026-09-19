@@ -38,10 +38,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/elfotito/drogueria-carrisan-backend.git"
+    "url": "git+https://github.com/viktorlolve/drogueria-carrisan-backend.git"
   },
   "bugs": {
-    "url": "https://github.com/elfotito/drogueria-carrisan-backend/issues"
+    "url": "https://github.com/viktorlolve/drogueria-carrisan-backend/issues"
   },
-  "homepage": "https://github.com/elfotito/drogueria-carrisan-backend#readme"
+  "homepage": "https://github.com/viktorlolve/drogueria-carrisan-backend#readme"
 }
